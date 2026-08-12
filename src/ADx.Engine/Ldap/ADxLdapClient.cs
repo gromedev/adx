@@ -81,7 +81,12 @@ public sealed class ADxLdapClient : ILdapSearchExecutor
             connection = new LdapConnection(identifier)
             {
                 AuthType = MapAuthType(options.AuthMode),
-                Timeout = TimeSpan.FromSeconds(options.SearchTimeoutSeconds)
+                // S.DS.Protocols connects lazily at the first bind, so the connect/bind phase
+                // is the only place ConnectTimeoutSeconds can be enforced; the (longer) search
+                // timeout takes over once the session is up. Before this the option was
+                // validated, documented, and never read -- a dead-DC probe waited the full
+                // search timeout regardless.
+                Timeout = TimeSpan.FromSeconds(options.ConnectTimeoutSeconds)
             };
 
             connection.SessionOptions.ProtocolVersion = 3;
@@ -122,6 +127,7 @@ public sealed class ADxLdapClient : ILdapSearchExecutor
         try
         {
             await client.BindWithRetryAsync(verbose, warning, cancellationToken).ConfigureAwait(false);
+            connection.Timeout = TimeSpan.FromSeconds(options.SearchTimeoutSeconds);
             client.RootDse = await client.ReadRootDseAsync(cancellationToken).ConfigureAwait(false);
         }
         catch
@@ -325,23 +331,44 @@ public sealed class ADxLdapClient : ILdapSearchExecutor
         if (cookie is { Length: > 0 }) paging.Cookie = cookie;
         request.Controls.Add(paging);
 
-        // Keeps a search from wandering into other domains when referrals are chased.
+        // With referral chasing OFF, the domain-scope control also suppresses the
+        // continuation references AD would otherwise embed in cross-partition results.
         if (!_options.ChaseReferrals && RootDse.SupportsDomainScope)
             request.Controls.Add(new DomainScopeControl());
 
-        var response = (SearchResponse)await SendAsync(request, cancellationToken).ConfigureAwait(false);
+        SearchResponse response;
+        var sizeLimited = false;
+        try
+        {
+            response = (SearchResponse)await SendAsync(request, cancellationToken).ConfigureAwait(false);
+        }
+        catch (DirectoryOperationException ex)
+            when (ex.Response is SearchResponse partial && partial.ResultCode == ResultCode.SizeLimitExceeded)
+        {
+            // resultCode 4: the server truncated at the caller's SizeLimit -- and the entries
+            // it DID collect ride inside the exception's response. Discarding them turned an
+            // explicit, caller-chosen limit into an error that threw away the data it asked
+            // for. Salvage the page and report no-more (the server will not continue past
+            // its own refusal). Latent until someone passes SizeLimit > 0; loaded trap
+            // otherwise.
+            response = partial;
+            sizeLimited = true;
+        }
 
         var entries = new List<LdapEntry>(response.Entries.Count);
         foreach (SearchResultEntry entry in response.Entries)
             entries.Add(Project(entry));
 
         byte[]? nextCookie = null;
-        foreach (DirectoryControl control in response.Controls)
+        if (!sizeLimited)
         {
-            if (control is PageResultResponseControl page)
+            foreach (DirectoryControl control in response.Controls)
             {
-                nextCookie = page.Cookie;
-                break;
+                if (control is PageResultResponseControl page)
+                {
+                    nextCookie = page.Cookie;
+                    break;
+                }
             }
         }
 

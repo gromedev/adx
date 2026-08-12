@@ -155,6 +155,7 @@ public abstract class ADxObjectCmdletBase : ADxCmdletBase
             onPageComplete: info => EnqueueVerbose(
                 $"Page {info.PageIndex}: {info.EntriesInPage} entries ({info.TotalEmitted} total)."),
             skipFirst: 0,
+            warning: EnqueueWarning,
             cancellationToken: CancellationToken);
 
         long emitted = 0;
@@ -254,9 +255,18 @@ public abstract class ADxObjectCmdletBase : ADxCmdletBase
         var fetchList = AdRsatProjector.BuildFetchList(
             ObjectSchema, Properties, AllowUnknownProperty.IsPresent, out var fetchAll);
 
-        var entry = kind == AdIdentityKind.DistinguishedName
-            ? ResolveByDn((string)value, fetchList)
-            : ResolveBySearch(kind, value, fetchList);
+        var entry = kind switch
+        {
+            AdIdentityKind.DistinguishedName => ResolveByDn((string)value, fetchList),
+            // No explicit -SearchBase: resolve through AD's <GUID=...> extended-DN read,
+            // which the server answers from ANY partition it holds (configuration and
+            // schema included) -- how RSAT resolves GUIDs. The defaultNamingContext
+            // subtree search cannot see those partitions; it remains the fallback, and
+            // the scoped path when the caller DID pass -SearchBase.
+            AdIdentityKind.ObjectGuid when SearchBase is null =>
+                ResolveByGuidBind((Guid)value, fetchList) ?? ResolveBySearch(kind, value, fetchList),
+            _ => ResolveBySearch(kind, value, fetchList)
+        };
 
         if (entry is null)
         {
@@ -308,6 +318,32 @@ public abstract class ADxObjectCmdletBase : ADxCmdletBase
         // wire filter does -- an inetOrgPerson IS a user, and requiring it to be the chain's
         // last element made this path reject objects -Filter returns.
         return ObjectSchema.MatchesType(entry.GetStrings("objectClass")) ? entry : null;
+    }
+
+    /// <summary>
+    /// The <c>&lt;GUID=...&gt;</c> extended-DN base read. Null (falling back to the search)
+    /// when the object does not exist, is not this schema's type, or the server does not
+    /// understand the extended syntax (non-AD).
+    /// </summary>
+    private LdapEntry? ResolveByGuidBind(Guid guid, IReadOnlyList<string> fetchList)
+    {
+        LdapEntry? entry;
+        try
+        {
+            entry = ResolveByDn($"<GUID={guid:D}>", fetchList);
+        }
+        catch (System.DirectoryServices.Protocols.DirectoryException)
+        {
+            return null;
+        }
+
+        // AD answers with the object's real DN; this guards the (non-AD) case where the
+        // extended form echoes back as the entry name.
+        if (entry is not null && entry.DistinguishedName.StartsWith('<') &&
+            entry.GetString("distinguishedName") is { Length: > 0 } realDn)
+            entry = new LdapEntry(realDn, entry.Attributes);
+
+        return entry;
     }
 
     private LdapEntry? ResolveBySearch(AdIdentityKind kind, object value, IReadOnlyList<string> fetchList)

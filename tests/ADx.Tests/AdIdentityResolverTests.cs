@@ -45,6 +45,34 @@ public class AdIdentityResolverTests
             Classify("{01234567-89ab-cdef-0123-456789abcdef}").Kind);
     }
 
+    // ---- SID identities are a security-principal form, matching RSAT ----
+
+    [Fact]
+    public void SidString_OnANonPrincipalSchema_FallsThroughToTheRejection()
+    {
+        // Get-ADObject/-ADOrganizationalUnit accept DN/GUID only; a SID string must not
+        // classify as a SID lookup their RSAT counterpart would refuse.
+        Assert.Throws<AdFilterTranslationException>(
+            () => AdIdentityResolver.Classify("S-1-5-32-544", AdObjectSchema.AnyObject));
+    }
+
+    [Fact]
+    public void TypedSid_OnANonPrincipalSchema_IsRejectedWithATailoredMessage()
+    {
+        var ex = Assert.Throws<AdFilterTranslationException>(
+            () => AdIdentityResolver.Classify(
+                new ADxSecurityIdentifier("S-1-5-32-544"), AdObjectSchema.AnyObject));
+        Assert.Contains("does not accept a SID", ex.Message);
+    }
+
+    [Fact]
+    public void TypedSid_OnAPrincipalSchema_ClassifiesAsSid()
+    {
+        var (kind, value) = Classify(new ADxSecurityIdentifier("S-1-5-32-544"));
+        Assert.Equal(AdIdentityKind.Sid, kind);
+        Assert.Equal("S-1-5-32-544", value);
+    }
+
     [Theory]
     [InlineData("S-1-5-21-3623811015-3361044348-30300820-1013")]
     [InlineData("S-1-5-32-544")]

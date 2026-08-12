@@ -33,8 +33,27 @@ public sealed class LdapEntry
     public LdapEntry(string distinguishedName, IReadOnlyDictionary<string, IReadOnlyList<object>> attributes)
     {
         DistinguishedName = distinguishedName ?? string.Empty;
-        Attributes = DropEmptyRangedSiblings(
-            attributes ?? new Dictionary<string, IReadOnlyList<object>>(StringComparer.OrdinalIgnoreCase));
+        Attributes = DropEmptyRangedSiblings(NormalizeComparer(
+            attributes ?? new Dictionary<string, IReadOnlyList<object>>(StringComparer.OrdinalIgnoreCase)));
+    }
+
+    /// <summary>
+    /// The case-insensitive-keys promise is enforced here, not merely documented: a caller
+    /// handing in a default-comparer dictionary previously kept case-SENSITIVE lookups
+    /// whenever <see cref="DropEmptyRangedSiblings"/> returned the input unchanged (the
+    /// common case), so <c>GetString("samaccountname")</c> silently missed
+    /// <c>sAMAccountName</c> depending on which constructor path built the entry.
+    /// </summary>
+    private static IReadOnlyDictionary<string, IReadOnlyList<object>> NormalizeComparer(
+        IReadOnlyDictionary<string, IReadOnlyList<object>> attributes)
+    {
+        if (attributes is Dictionary<string, IReadOnlyList<object>> dictionary &&
+            ReferenceEquals(dictionary.Comparer, StringComparer.OrdinalIgnoreCase))
+            return attributes;
+
+        var copy = new Dictionary<string, IReadOnlyList<object>>(attributes.Count, StringComparer.OrdinalIgnoreCase);
+        foreach (var (key, values) in attributes) copy[key] = values;
+        return copy;
     }
 
     /// <summary>

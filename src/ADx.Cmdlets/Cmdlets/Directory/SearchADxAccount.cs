@@ -126,6 +126,7 @@ public sealed class SearchADxAccount : ADxCmdletBase
                 onPageComplete: info => EnqueueVerbose(
                     $"Page {info.PageIndex}: {info.EntriesInPage} entries."),
                 skipFirst: 0,
+                warning: EnqueueWarning,
                 cancellationToken: CancellationToken);
 
             long emitted = 0;

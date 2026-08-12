@@ -271,7 +271,7 @@ public abstract class ADxGroupQueryCmdletBase : ADxMembershipQueryCmdletBase
         var iterator = new LdapPageIterator(GetConnection());
         var enumerator = iterator
             .StreamAsync(spec, maxItems: 0, onPageComplete: null, skipFirst: 0,
-                cancellationToken: CancellationToken)
+                warning: EnqueueWarning, cancellationToken: CancellationToken)
             .GetAsyncEnumerator(CancellationToken);
         try
         {

@@ -47,10 +47,17 @@ internal static class AdIdentityResolver
                 return (AdIdentityKind.ObjectGuid, guid);
 
             case ADxSecurityIdentifier sid:
-                return (AdIdentityKind.Sid, sid.Value);
+                return ClassifySid(sid.Value, schema);
 
             case string s:
                 return ClassifyString(s, schema);
+
+            // RSAT's own SID output type, duck-typed by NAME: constructing the real
+            // System.Security.Principal.SecurityIdentifier is Windows-only and referencing
+            // its assembly would add a dependency, but on Windows a drop-in script passes
+            // $rsatUser.SID straight in and RSAT accepts it. ToString() is its SDDL form.
+            case not null when value.GetType().FullName == "System.Security.Principal.SecurityIdentifier":
+                return ClassifySid(value.ToString()!, schema);
 
             default:
                 // Piped objects arrive here WHOLE: -Identity is typed object, and PowerShell
@@ -67,6 +74,22 @@ internal static class AdIdentityResolver
                     $"objectGUID{(schema.IdentityIncludesSamAccountName ? ", SID, or sAMAccountName" : " or SID")}, " +
                     "or pipe an object with a DistinguishedName property.");
         }
+    }
+
+    /// <summary>
+    /// A TYPED SID identity (ADxSecurityIdentifier or the real SecurityIdentifier). Accepted
+    /// only for security-principal types, mirroring the string-form gate in
+    /// <see cref="ClassifyString"/>: RSAT's Get-ADObject/-ADOrganizationalUnit reject SID
+    /// identities in any spelling.
+    /// </summary>
+    private static (AdIdentityKind Kind, object Value) ClassifySid(string sddl, AdObjectSchema schema)
+    {
+        if (schema.IdentityIncludesSamAccountName)
+            return (AdIdentityKind.Sid, sddl);
+
+        throw new AdFilterTranslationException(
+            $"Get-ADx{char.ToUpperInvariant(schema.TypeLabel[0])}{schema.TypeLabel.Substring(1)} does not " +
+            "accept a SID as -Identity, matching its RSAT counterpart. Use a distinguished name or objectGUID.");
     }
 
     private static string? TryGetDistinguishedName(object identity)
@@ -102,7 +125,12 @@ internal static class AdIdentityResolver
         if (Guid.TryParseExact(trimmed, "D", out var guid) || Guid.TryParseExact(trimmed, "N", out guid))
             return (AdIdentityKind.ObjectGuid, guid);
 
-        if (SidPattern.IsMatch(trimmed))
+        // Gated by the schema BEFORE the pattern: RSAT's non-principal cmdlets (Get-ADObject,
+        // Get-ADOrganizationalUnit) accept DN/GUID only, and a SID string reaching them must
+        // fall through to the tailored rejection below rather than classify as a SID lookup
+        // the counterpart would refuse. For PSOs the fall-through is IdentityByName -- a
+        // policy legitimately named like a SID stays resolvable by name.
+        if (schema.IdentityIncludesSamAccountName && SidPattern.IsMatch(trimmed))
             return (AdIdentityKind.Sid, trimmed);
 
         if (schema.IdentityIncludesSamAccountName)

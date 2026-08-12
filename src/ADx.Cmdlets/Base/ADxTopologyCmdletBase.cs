@@ -93,7 +93,8 @@ public abstract class ADxTopologyCmdletBase : ADxCmdletBase
 
         var iterator = new LdapPageIterator(GetConnection());
         var enumerator = iterator.StreamAsync(spec, maxItems: 0, onPageComplete: null,
-            skipFirst: 0, cancellationToken: CancellationToken).GetAsyncEnumerator(CancellationToken);
+            skipFirst: 0, warning: EnqueueWarning,
+            cancellationToken: CancellationToken).GetAsyncEnumerator(CancellationToken);
         try
         {
             while (enumerator.MoveNextAsync().AsTask().GetAwaiter().GetResult())

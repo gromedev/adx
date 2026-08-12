@@ -169,6 +169,37 @@ public class LdapPagingTests
     }
 
     [Fact]
+    public async Task EmptyPageBailout_AnnouncesItselfThroughTheWarningCallback()
+    {
+        // Giving up must be distinguishable from finishing: an operator cannot tell
+        // "search complete" from "search abandoned" without this signal.
+        var pages = Enumerable.Range(0, 50)
+            .Select(_ => new LdapPage(Array.Empty<LdapEntry>(), new byte[] { 9 }));
+        var fake = new FakeLdapExecutor(pages);
+
+        var warnings = new List<string>();
+        await foreach (var _ in new LdapPageIterator(fake).StreamAsync(Spec, warning: warnings.Add)) { }
+
+        var warning = Assert.Single(warnings);
+        Assert.Contains("incomplete", warning, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void LdapEntry_PublicConstructor_NormalizesTheKeyComparer()
+    {
+        // The case-insensitive-keys promise must hold for entries built through the public
+        // ctor with a default-comparer dictionary -- the seam external hosts and tests hit.
+        var defaultComparer = new Dictionary<string, IReadOnlyList<object>>
+        {
+            ["sAMAccountName"] = new object[] { "jdoe" }
+        };
+
+        var entry = new LdapEntry("CN=X,DC=x", defaultComparer);
+
+        Assert.Equal("jdoe", entry.GetString("samaccountname"));
+    }
+
+    [Fact]
     public async Task CancellationPropagates()
     {
         var fake = new FakeLdapExecutor(new[]

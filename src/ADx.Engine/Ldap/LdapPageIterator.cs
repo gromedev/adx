@@ -37,11 +37,17 @@ public sealed class LdapPageIterator
     /// Entries to discard before emitting. Used when resuming inside a partition whose
     /// first N entries were already written.
     /// </param>
+    /// <param name="warning">
+    /// Fires when the stream gives up on a misbehaving server (the empty-page guard). An
+    /// operator must be able to distinguish "search complete" from "search abandoned" --
+    /// truncation must be announced, never silent.
+    /// </param>
     public async IAsyncEnumerable<LdapEntry> StreamAsync(
         LdapSearchSpec spec,
         long maxItems = 0,
         Action<LdapPageCompletedInfo>? onPageComplete = null,
         long skipFirst = 0,
+        Action<string>? warning = null,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(spec);
@@ -62,7 +68,14 @@ public sealed class LdapPageIterator
             if (page.Entries.Count == 0)
             {
                 if (!page.HasMore) yield break;
-                if (++consecutiveEmptyPages >= MaxConsecutiveEmptyPages) yield break;
+                if (++consecutiveEmptyPages >= MaxConsecutiveEmptyPages)
+                {
+                    warning?.Invoke(
+                        $"Search abandoned after {MaxConsecutiveEmptyPages} consecutive empty pages that " +
+                        "each carried a continuation cookie -- the server kept promising more results and " +
+                        "delivering none. Results may be incomplete.");
+                    yield break;
+                }
                 cookie = page.Cookie;
                 continue;
             }

@@ -66,6 +66,7 @@ public abstract class ADxMembershipQueryCmdletBase : ADxCmdletBase
             onPageComplete: info => EnqueueVerbose(
                 $"Page {info.PageIndex}: {info.EntriesInPage} entries ({info.TotalEmitted} total)."),
             skipFirst: 0,
+            warning: EnqueueWarning,
             cancellationToken: CancellationToken);
 
         long emitted = 0;

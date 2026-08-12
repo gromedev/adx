@@ -111,6 +111,7 @@ public sealed class SearchADxObject : ADxCmdletBase
                 onPageComplete: info => EnqueueVerbose(
                     $"Page {info.PageIndex}: {info.EntriesInPage} entries ({info.TotalEmitted} total)."),
                 skipFirst: 0,
+                warning: EnqueueWarning,
                 cancellationToken: CancellationToken);
 
             // Drive the async sequence from the pipeline thread. WriteObject and
