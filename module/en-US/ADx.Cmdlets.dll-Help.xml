@@ -8885,7 +8885,8 @@ Search-ADxObject '(objectClass=group)' -SearchBase $root.DefaultNamingContext -A
     </command:returnValues>
     <maml:alertSet>
       <maml:alert>
-        <maml:para>`PrimaryGroup`, `IPv4Address`, `IPv6Address`, `ProtectedFromAccidentalDeletion`, and `PrincipalsAllowedToDelegateToAccount` are not supported in `-Properties`; each needs data outside a plain attribute read, and asking for them is an explicit error rather than a silent null column.</maml:para>
+        <maml:para>`PrimaryGroup`, `IPv4Address`, `IPv6Address`, `ProtectedFromAccidentalDeletion`, `PrincipalsAllowedToDelegateToAccount`, `KerberosEncryptionType`, and `CompoundIdentitySupported` are not supported in `-Properties`; each needs data outside a plain attribute read, and asking for them is an explicit error rather than a silent null column.</maml:para>
+        <maml:para>`LockedOut` reads the DC-computed lockout bit, which respects the lockout window (matching `Get-ADUser`). Filtering on `LockedOut` can only test the stored `lockoutTime`, which persists after a lockout expires — an account the filter matches can therefore project `LockedOut: False`; the projected property is the truth.</maml:para>
       </maml:alert>
     </maml:alertSet>
     <command:examples>
@@ -8962,6 +8963,8 @@ PS C:\&gt; Get-ADxUser -Filter "LastLogonDate -lt $cutoff" -Properties LastLogon
       <maml:para>Finds user and computer accounts by a single state criterion. Each criterion switch is its own parameter set, so exactly one is chosen per call; results are scoped with -UsersOnly / -ComputersOnly. There is no -Filter/-Identity/-Properties - the criterion is the filter and the output is a fixed slim account shape, matching RSAT.</maml:para>
       <maml:para>Criteria: -AccountDisabled, -AccountExpired, -AccountExpiring (with -DateTime or -TimeSpan), -AccountInactive (with -DateTime or -TimeSpan), -LockedOut, -PasswordExpired, -PasswordNeverExpires.</maml:para>
       <maml:para>-PasswordExpired is filtered client-side per object: its bit lives in the constructed msDS-User-Account-Control-Computed, which Active Directory cannot match in a search filter, so this criterion reads the whole in-scope account population and tests each locally. -DateTime is interpreted in local time, matching RSAT. -AccountInactive uses the replicated lastLogonTimestamp (up to ~14 days stale), the same signal RSAT uses.</maml:para>
+      <maml:para>-LockedOut tests the stored lockoutTime (&gt;= 1), matching Search-ADAccount - which also means it can return accounts whose lockout window has already expired, since Active Directory clears lockoutTime only on the next successful logon or an admin unlock. The LockedOut column those objects project reads the DC-computed bit and reports False for them; the projected property is the truth.</maml:para>
+      <maml:para>-AccountExpiring and -AccountInactive require exactly one of -DateTime or -TimeSpan. RSAT applies an undocumented default window when neither is given; ADx asks for the boundary explicitly - a deliberate, documented divergence.</maml:para>
     </maml:description>
     <command:syntax>
       <command:syntaxItem>

@@ -1,6 +1,6 @@
 ---
 external help file: ADx.Cmdlets.dll-Help.xml
-Module Name: adx
+Module Name: ADx
 online version: https://github.com/gromedev/adx/blob/main/module/help/Search-ADxAccount.md
 schema: 2.0.0
 ---
@@ -85,6 +85,16 @@ msDS-User-Account-Control-Computed, which Active Directory cannot match in a sea
 this criterion reads the whole in-scope account population and tests each locally. -DateTime is
 interpreted in local time, matching RSAT. -AccountInactive uses the replicated lastLogonTimestamp
 (up to ~14 days stale), the same signal RSAT uses.
+
+-LockedOut tests the stored lockoutTime (>= 1), matching Search-ADAccount - which also means it
+can return accounts whose lockout window has already expired, since Active Directory clears
+lockoutTime only on the next successful logon or an admin unlock. The LockedOut column those
+objects project reads the DC-computed bit and reports False for them; the projected property is
+the truth.
+
+-AccountExpiring and -AccountInactive require exactly one of -DateTime or -TimeSpan. RSAT
+applies an undocumented default window when neither is given; ADx asks for the boundary
+explicitly - a deliberate, documented divergence.
 
 ## EXAMPLES
 

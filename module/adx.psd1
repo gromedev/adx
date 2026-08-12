@@ -1,6 +1,6 @@
 @{
     RootModule        = 'adx.psm1'
-    ModuleVersion     = '0.2.7'
+    ModuleVersion     = '0.3.0'
     GUID              = 'cd162d8a-384b-4915-9013-8d200fd7579e'
     Author            = 'Thomas Maillo Grome'
     CompanyName       = 'ADx'
@@ -47,6 +47,27 @@
             LicenseUri   = 'https://github.com/gromedev/adx/blob/main/LICENSE'
             ProjectUri   = 'https://github.com/gromedev/adx'
             ReleaseNotes = @'
+v0.3.0 - Correctness release: every finding from a full four-reviewer audit fixed
+- Silent-wrong-answer fixes: RBCD/gMSA security descriptors no longer null when their bytes
+  decode as UTF-8; DateTime variables and date strings in -Filter now agree (Kind=Unspecified
+  is local, matching RSAT); LockedOut reads the DC-computed lockout bit so expired lockouts
+  read False; Get-ADxPrincipalGroupMembership resolves computer names (WS01) like RSAT;
+  Global Catalog binds no longer count other domains' primary-group members (warned instead)
+- '*' in an -eq/-ne value is now a terminating error: RSAT reads it as a wildcard, PowerShell
+  as a literal, and silently picking either can invert a result set ("mail -ne '*'"). The
+  error offers -like/-notlike, $null tests, and -LDAPFilter spellings
+- New: -approx operator, -RecursiveMatch on any DN-valued attribute (manager chains),
+  underscore attribute names, GUID identities resolved across partitions (<GUID=...> reads),
+  RSAT's SecurityIdentifier accepted as -Identity
+- Fidelity: Description is a scalar string; Integer-syntax attributes are Int32 (uSN* stay
+  Int64); AccountDomainSid is null for non-account SIDs; sub-second time bounds round
+  direction-aware; pre-1601 timestamps error cleanly
+- Loud where it was silent: -ResultSetSize warns on truncation; the paging empty-page guard
+  announces abandonment; SizeLimit-truncated pages are salvaged, not discarded;
+  foreign-member warnings now cover groups past MaxValRange
+- ConnectTimeoutSeconds is honoured; Ctrl-C during cancellation no longer races a disposed
+  token source; examples now cover all 17 cmdlets
+
 v0.2.7 - Three more read cmdlets: service accounts, fine-grained policies, account search
 - Get-ADxServiceAccount (Get-ADServiceAccount): standalone and group-managed service accounts,
   matched by their shared base class; the gMSA password-retrieval ACL is declared unsupported

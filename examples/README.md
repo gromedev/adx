@@ -89,18 +89,42 @@ can change your directory.
 | [22-paging-limits-and-timeouts.ps1](22-paging-limits-and-timeouts.ps1) | `-ResultSetSize`, `-ResultPageSize`, `-Top`, `-All`, `-SearchTimeout` — which knob does what |
 | [23-benchmark-against-rsat.ps1](23-benchmark-against-rsat.ps1) | Measure ADx against RSAT on your own domain instead of trusting the README |
 
+### Domain, forest, and policy
+
+| Script | Description |
+|--------|-------------|
+| [24-domain-and-forest-topology.ps1](24-domain-and-forest-topology.ps1) | Domain and forest identity, all five FSMO roles, every DC, and the OU tree with its GPO links |
+| [25-password-policy-review.ps1](25-password-policy-review.ps1) | The default domain policy next to every PSO — interval TimeSpans, `AppliesTo`, and precedence |
+
+### Service accounts and account state
+
+| Script | Description |
+|--------|-------------|
+| [26-service-account-inventory.ps1](26-service-account-inventory.ps1) | gMSA and sMSA inventory — the accounts whose passwords AD itself rotates |
+| [27-account-lifecycle-audit.ps1](27-account-lifecycle-audit.ps1) | Disabled, expired, expiring, inactive, locked out — one criterion switch per call |
+| [28-who-belongs-to-what.ps1](28-who-belongs-to-what.ps1) | A principal's groups, including the primary-group membership a `memberOf` read misses |
+
 ## Cmdlet coverage
 
 Every ADx cmdlet is demonstrated in at least one script:
 
 | Cmdlet | Scripts |
 |--------|---------|
-| `Get-ADxUser` | 02, 03, 04, 05, 06, 07, 08, 11, 12, 13, 18, 19, 20, 21, 22, 23 |
+| `Get-ADxUser` | 02, 03, 04, 05, 06, 07, 08, 11, 12, 13, 18, 19, 20, 21, 22, 23, 27, 28 |
 | `Get-ADxGroup` | 04, 09, 10, 11, 12, 13, 18 |
 | `Get-ADxComputer` | 14, 15, 18, 21 |
 | `Get-ADxObject` | 08, 16 |
+| `Get-ADxOrganizationalUnit` | 24 |
+| `Get-ADxServiceAccount` | 26 |
 | `Get-ADxGroupMember` | 04, 10, 11, 12, 13 |
 | `Get-ADxGroupNested` | 11 |
+| `Get-ADxPrincipalGroupMembership` | 28 |
+| `Get-ADxDomain` | 24 |
+| `Get-ADxForest` | 24 |
+| `Get-ADxDomainController` | 24 |
+| `Get-ADxDefaultDomainPasswordPolicy` | 25 |
+| `Get-ADxFineGrainedPasswordPolicy` | 25 |
+| `Search-ADxAccount` | 27 |
 | `Get-ADxRootDse` | 01, 19 |
 | `Search-ADxObject` | 01, 10, 17, 19, 22 |
 

@@ -411,10 +411,16 @@ Surname, UserPrincipalName.
 
 ## NOTES
 
-`PrimaryGroup`, `IPv4Address`, `IPv6Address`, `ProtectedFromAccidentalDeletion`, and
-`PrincipalsAllowedToDelegateToAccount` are not supported in `-Properties`; each needs data
-outside a plain attribute read, and asking for them is an explicit error rather than a silent
-null column.
+`PrimaryGroup`, `IPv4Address`, `IPv6Address`, `ProtectedFromAccidentalDeletion`,
+`PrincipalsAllowedToDelegateToAccount`, `KerberosEncryptionType`, and
+`CompoundIdentitySupported` are not supported in `-Properties`; each needs data outside a
+plain attribute read, and asking for them is an explicit error rather than a silent null
+column.
+
+`LockedOut` reads the DC-computed lockout bit, which respects the lockout window (matching
+`Get-ADUser`). Filtering on `LockedOut` can only test the stored `lockoutTime`, which persists
+after a lockout expires — an account the filter matches can therefore project
+`LockedOut: False`; the projected property is the truth.
 
 ## RELATED LINKS
 

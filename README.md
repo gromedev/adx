@@ -164,6 +164,11 @@ pwsh -NoProfile -File ./build.ps1 -Configuration Release
 
 ### Known limitations
 
+- **Global Catalog binds drop primary-group reconciliation, with a warning.** `primaryGroupID`
+  holds a domain-relative RID, and matching it across a GC's forest-wide namespace would count
+  *other* domains' accounts (every child domain's RID-513 users, say) as members of the queried
+  group. On port 3268/3269 the membership cmdlets therefore emit only the `memberOf` arms and
+  warn that primary-group members are excluded; bind the group's own domain to include them.
 - **Multi-domain forests:** the membership cmdlets — `Get-ADxGroupMember`, `Get-ADxGroupNested`,
   and `Get-ADxPrincipalGroupMembership` — enumerate within one domain partition, so a membership
   in another domain of the forest is not returned. This is structural, not a tuning problem: a
@@ -200,9 +205,39 @@ pwsh -NoProfile -File ./build.ps1 -Configuration Release
   3,733 under ADx. ADx's answer is the correct one — RSAT confirms those users are in Domain
   Users, and Domain Users is in BUILTIN\Users — but if you need byte-identical RSAT output,
   this is where the two differ. See the CHANGELOG for the full measurement.
-- **Unvalidated at scale.** Everything above was verified on a small domain. Nothing here has
-  been run against 100,000+ objects yet, so treat 0.2.x as pre-production for large
-  environments.
+- **Validated at scale in one lab, not yet in the field.** The 500,000-object run above is a
+  single environment on one set of hardware; no production deployment has exercised 0.3.x yet.
+  Treat it as pre-1.0: verified where we could verify, waiting on real-world mileage for the
+  rest.
+
+### Deliberate divergences from RSAT
+
+Each of these is a *decision*, made once and documented here, never a silent difference:
+
+- **`*` inside an `-eq`/`-ne` value is a terminating error.** RSAT passes the `*` to LDAP as a
+  wildcard (its `mail -ne '*'` idiom means "mail absent"); PowerShell's `-eq` means a literal
+  asterisk. The two readings can return near-opposite result sets, so ADx refuses to pick one
+  silently. Use `-like`/`-notlike` for wildcard or presence semantics (`mail -notlike '*'` is
+  "mail absent"), `-eq $null`/`-ne $null` for presence tests, or `-LDAPFilter` with `\2a` for a
+  literal asterisk.
+- **`LockedOut` differs between projection and filtering — inside RSAT too.** The output
+  property reads the DC-computed `ADS_UF_LOCKOUT` bit, which respects the lockout window
+  (matching `Get-ADUser`); `-Filter "LockedOut -eq $true"` and `Search-ADxAccount -LockedOut`
+  can only test the stored `lockoutTime >= 1` (the computed attribute is not filterable), which
+  also matches accounts whose lockout has already expired (matching `Search-ADAccount`). An
+  account can therefore be *returned* by the filter yet *project* `LockedOut: False` — read the
+  projected property as the truth.
+- **`-ResultSetSize` warns on truncation instead of erroring.** When more objects match than
+  the cap, ADx emits the first N plus a warning; RSAT raises an error. Either way the
+  truncation is loud, never silent.
+- **`Search-ADxAccount -AccountExpiring`/`-AccountInactive` require an explicit window** —
+  exactly one of `-DateTime` or `-TimeSpan`. RSAT applies an undocumented default window;
+  ADx asks you to state the boundary a zero-row-on-inversion query silently depends on.
+- **Sub-second timestamp bounds on `whenCreated`-class attributes are rounded
+  direction-aware.** AD stores those attributes at whole-second precision; ADx rounds a
+  fractional bound in the operator's direction (an exact equivalence, not an approximation)
+  and refuses fractional equality outright. FILETIME attributes (`pwdLastSet`, ...) keep full
+  100 ns precision.
 
 ## License
 

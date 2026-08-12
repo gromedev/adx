@@ -1,6 +1,6 @@
 ---
 external help file: ADx.Cmdlets.dll-Help.xml
-Module Name: adx
+Module Name: ADx
 online version: https://github.com/gromedev/adx/blob/main/module/help/Get-ADxFineGrainedPasswordPolicy.md
 schema: 2.0.0
 ---
