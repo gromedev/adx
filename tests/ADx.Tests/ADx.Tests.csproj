@@ -1,0 +1,41 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- net9.0 deliberately: it matches src/, so these tests exercise the same target the
+         module actually ships on. PowerShell 7.5 hosts .NET 9.
+         RollForward=Major lets the test host start on a newer runtime when .NET 9 is not
+         installed, which is the case on a machine carrying only the .NET 10 SDK. Running on
+         real .NET 9 - the shipping runtime - means running the suite in Docker; roll-forward
+         is a local-convenience fallback, not the authoritative result. -->
+    <TargetFramework>net9.0</TargetFramework>
+    <RollForward>Major</RollForward>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" Version="6.0.4" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+
+    <!-- Supplies two things the shipped module gets from its PowerShell host instead:
+         System.Management.Automation (ADx.Cmdlets references it with PrivateAssets="all", so
+         it does not flow here, yet deriving from ADxCmdletBase needs PSCmdlet), and the
+         RID-correct System.DirectoryServices.Protocols. ADx.Engine references the latter with
+         ExcludeAssets="runtime" precisely so the module never ships its own copy - but a plain
+         `dotnet test` host has no pwsh app base to borrow it from. -->
+    <PackageReference Include="Microsoft.PowerShell.SDK" Version="7.5.5" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/ADx.Engine/ADx.Engine.csproj" />
+    <ProjectReference Include="../../src/ADx.Cmdlets/ADx.Cmdlets.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+</Project>

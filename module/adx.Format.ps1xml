@@ -1,0 +1,295 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Configuration>
+  <ViewDefinitions>
+
+    <!-- ADx.Entry: default table for on-prem directory entries.
+         The attribute set is query-dependent, so this shows the few properties that are
+         near-universal and lets everything else fall through to Format-List.
+         Widths total 118 for a 120-char terminal. -->
+    <View>
+      <Name>ADx.Entry</Name>
+      <ViewSelectedBy>
+        <TypeName>ADx.Entry</TypeName>
+      </ViewSelectedBy>
+      <TableControl>
+        <TableHeaders>
+          <TableColumnHeader><Label>sAMAccountName</Label><Width>24</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Enabled</Label><Width>8</Width></TableColumnHeader>
+          <TableColumnHeader><Label>DistinguishedName</Label><Width>86</Width></TableColumnHeader>
+        </TableHeaders>
+        <TableRowEntries>
+          <TableRowEntry>
+            <TableColumnItems>
+              <TableColumnItem>
+                <ScriptBlock>if ($_.sAMAccountName) { $_.sAMAccountName } elseif ($_.name) { $_.name } elseif ($_.cn) { $_.cn } else { '' }</ScriptBlock>
+              </TableColumnItem>
+              <TableColumnItem><PropertyName>Enabled</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>DistinguishedName</PropertyName></TableColumnItem>
+            </TableColumnItems>
+          </TableRowEntry>
+        </TableRowEntries>
+      </TableControl>
+    </View>
+
+    <!-- The RSAT presets render as LISTS, because that is what RSAT does: Get-ADUser
+         prints a property list per object, not a table. Scripts never depend on the view,
+         but eyes moving between Get-ADUser and Get-ADxUser output do. Each view lists the
+         type's default property set in schema order; extra -Properties fall through to
+         Format-List as usual. These select on the specific typename (ADx.User is
+         TypeNames[0], ADx.Entry is [1]), so they win over the generic ADx.Entry table. -->
+    <View>
+      <Name>ADx.User</Name>
+      <ViewSelectedBy>
+        <TypeName>ADx.User</TypeName>
+      </ViewSelectedBy>
+      <ListControl>
+        <ListEntries>
+          <ListEntry>
+            <ListItems>
+              <ListItem><PropertyName>DistinguishedName</PropertyName></ListItem>
+              <ListItem><PropertyName>Enabled</PropertyName></ListItem>
+              <ListItem><PropertyName>GivenName</PropertyName></ListItem>
+              <ListItem><PropertyName>Name</PropertyName></ListItem>
+              <ListItem><PropertyName>ObjectClass</PropertyName></ListItem>
+              <ListItem><PropertyName>ObjectGUID</PropertyName></ListItem>
+              <ListItem><PropertyName>SamAccountName</PropertyName></ListItem>
+              <ListItem><PropertyName>SID</PropertyName></ListItem>
+              <ListItem><PropertyName>Surname</PropertyName></ListItem>
+              <ListItem><PropertyName>UserPrincipalName</PropertyName></ListItem>
+            </ListItems>
+          </ListEntry>
+        </ListEntries>
+      </ListControl>
+    </View>
+
+    <View>
+      <Name>ADx.Group</Name>
+      <ViewSelectedBy>
+        <TypeName>ADx.Group</TypeName>
+      </ViewSelectedBy>
+      <ListControl>
+        <ListEntries>
+          <ListEntry>
+            <ListItems>
+              <ListItem><PropertyName>DistinguishedName</PropertyName></ListItem>
+              <ListItem><PropertyName>GroupCategory</PropertyName></ListItem>
+              <ListItem><PropertyName>GroupScope</PropertyName></ListItem>
+              <ListItem><PropertyName>Name</PropertyName></ListItem>
+              <ListItem><PropertyName>ObjectClass</PropertyName></ListItem>
+              <ListItem><PropertyName>ObjectGUID</PropertyName></ListItem>
+              <ListItem><PropertyName>SamAccountName</PropertyName></ListItem>
+              <ListItem><PropertyName>SID</PropertyName></ListItem>
+            </ListItems>
+          </ListEntry>
+        </ListEntries>
+      </ListControl>
+    </View>
+
+    <View>
+      <Name>ADx.Computer</Name>
+      <ViewSelectedBy>
+        <TypeName>ADx.Computer</TypeName>
+      </ViewSelectedBy>
+      <ListControl>
+        <ListEntries>
+          <ListEntry>
+            <ListItems>
+              <ListItem><PropertyName>DistinguishedName</PropertyName></ListItem>
+              <ListItem><PropertyName>DNSHostName</PropertyName></ListItem>
+              <ListItem><PropertyName>Enabled</PropertyName></ListItem>
+              <ListItem><PropertyName>Name</PropertyName></ListItem>
+              <ListItem><PropertyName>ObjectClass</PropertyName></ListItem>
+              <ListItem><PropertyName>ObjectGUID</PropertyName></ListItem>
+              <ListItem><PropertyName>SamAccountName</PropertyName></ListItem>
+              <ListItem><PropertyName>SID</PropertyName></ListItem>
+              <ListItem><PropertyName>UserPrincipalName</PropertyName></ListItem>
+            </ListItems>
+          </ListEntry>
+        </ListEntries>
+      </ListControl>
+    </View>
+
+    <View>
+      <Name>ADx.Object</Name>
+      <ViewSelectedBy>
+        <TypeName>ADx.Object</TypeName>
+      </ViewSelectedBy>
+      <ListControl>
+        <ListEntries>
+          <ListEntry>
+            <ListItems>
+              <ListItem><PropertyName>DistinguishedName</PropertyName></ListItem>
+              <ListItem><PropertyName>Name</PropertyName></ListItem>
+              <ListItem><PropertyName>ObjectClass</PropertyName></ListItem>
+              <ListItem><PropertyName>ObjectGUID</PropertyName></ListItem>
+            </ListItems>
+          </ListEntry>
+        </ListEntries>
+      </ListControl>
+    </View>
+
+    <!-- ADx.OrganizationalUnit: list view in default-property order, like the other presets. -->
+    <View>
+      <Name>ADx.OrganizationalUnit</Name>
+      <ViewSelectedBy>
+        <TypeName>ADx.OrganizationalUnit</TypeName>
+      </ViewSelectedBy>
+      <ListControl>
+        <ListEntries>
+          <ListEntry>
+            <ListItems>
+              <ListItem><PropertyName>City</PropertyName></ListItem>
+              <ListItem><PropertyName>Country</PropertyName></ListItem>
+              <ListItem><PropertyName>DistinguishedName</PropertyName></ListItem>
+              <ListItem><PropertyName>LinkedGroupPolicyObjects</PropertyName></ListItem>
+              <ListItem><PropertyName>ManagedBy</PropertyName></ListItem>
+              <ListItem><PropertyName>Name</PropertyName></ListItem>
+              <ListItem><PropertyName>ObjectClass</PropertyName></ListItem>
+              <ListItem><PropertyName>ObjectGUID</PropertyName></ListItem>
+              <ListItem><PropertyName>PostalCode</PropertyName></ListItem>
+              <ListItem><PropertyName>State</PropertyName></ListItem>
+              <ListItem><PropertyName>StreetAddress</PropertyName></ListItem>
+            </ListItems>
+          </ListEntry>
+        </ListEntries>
+      </ListControl>
+    </View>
+
+    <!-- ADx.DefaultDomainPasswordPolicy: one fixed-shape object; RSAT renders it as a list. -->
+    <View>
+      <Name>ADx.DefaultDomainPasswordPolicy</Name>
+      <ViewSelectedBy>
+        <TypeName>ADx.DefaultDomainPasswordPolicy</TypeName>
+      </ViewSelectedBy>
+      <ListControl>
+        <ListEntries>
+          <ListEntry>
+            <ListItems>
+              <ListItem><PropertyName>ComplexityEnabled</PropertyName></ListItem>
+              <ListItem><PropertyName>DistinguishedName</PropertyName></ListItem>
+              <ListItem><PropertyName>LockoutDuration</PropertyName></ListItem>
+              <ListItem><PropertyName>LockoutObservationWindow</PropertyName></ListItem>
+              <ListItem><PropertyName>LockoutThreshold</PropertyName></ListItem>
+              <ListItem><PropertyName>MaxPasswordAge</PropertyName></ListItem>
+              <ListItem><PropertyName>MinPasswordAge</PropertyName></ListItem>
+              <ListItem><PropertyName>MinPasswordLength</PropertyName></ListItem>
+              <ListItem><PropertyName>PasswordHistoryCount</PropertyName></ListItem>
+              <ListItem><PropertyName>ReversibleEncryptionEnabled</PropertyName></ListItem>
+            </ListItems>
+          </ListEntry>
+        </ListEntries>
+      </ListControl>
+    </View>
+
+    <!-- ADx.Domain: one fixed-shape object; RSAT renders it as a list. -->
+    <View>
+      <Name>ADx.Domain</Name>
+      <ViewSelectedBy>
+        <TypeName>ADx.Domain</TypeName>
+      </ViewSelectedBy>
+      <ListControl>
+        <ListEntries>
+          <ListEntry>
+            <ListItems>
+              <ListItem><PropertyName>DistinguishedName</PropertyName></ListItem>
+              <ListItem><PropertyName>Name</PropertyName></ListItem>
+              <ListItem><PropertyName>DNSRoot</PropertyName></ListItem>
+              <ListItem><PropertyName>NetBIOSName</PropertyName></ListItem>
+              <ListItem><PropertyName>DomainMode</PropertyName></ListItem>
+              <ListItem><PropertyName>DomainSID</PropertyName></ListItem>
+              <ListItem><PropertyName>Forest</PropertyName></ListItem>
+              <ListItem><PropertyName>ParentDomain</PropertyName></ListItem>
+              <ListItem><PropertyName>ChildDomains</PropertyName></ListItem>
+              <ListItem><PropertyName>PDCEmulator</PropertyName></ListItem>
+              <ListItem><PropertyName>RIDMaster</PropertyName></ListItem>
+              <ListItem><PropertyName>InfrastructureMaster</PropertyName></ListItem>
+              <ListItem><PropertyName>ReplicaDirectoryServers</PropertyName></ListItem>
+              <ListItem><PropertyName>ReadOnlyReplicaDirectoryServers</PropertyName></ListItem>
+            </ListItems>
+          </ListEntry>
+        </ListEntries>
+      </ListControl>
+    </View>
+
+    <!-- ADx.Forest: one fixed-shape object; RSAT renders it as a list. -->
+    <View>
+      <Name>ADx.Forest</Name>
+      <ViewSelectedBy>
+        <TypeName>ADx.Forest</TypeName>
+      </ViewSelectedBy>
+      <ListControl>
+        <ListEntries>
+          <ListEntry>
+            <ListItems>
+              <ListItem><PropertyName>Name</PropertyName></ListItem>
+              <ListItem><PropertyName>RootDomain</PropertyName></ListItem>
+              <ListItem><PropertyName>ForestMode</PropertyName></ListItem>
+              <ListItem><PropertyName>SchemaMaster</PropertyName></ListItem>
+              <ListItem><PropertyName>DomainNamingMaster</PropertyName></ListItem>
+              <ListItem><PropertyName>Domains</PropertyName></ListItem>
+              <ListItem><PropertyName>GlobalCatalogs</PropertyName></ListItem>
+              <ListItem><PropertyName>Sites</PropertyName></ListItem>
+              <ListItem><PropertyName>UPNSuffixes</PropertyName></ListItem>
+              <ListItem><PropertyName>SPNSuffixes</PropertyName></ListItem>
+            </ListItems>
+          </ListEntry>
+        </ListEntries>
+      </ListControl>
+    </View>
+
+    <!-- ADx.DomainController: a DC can come back singly or as a set (-Filter *); a list
+         still reads best given OperationMasterRoles and the DNs. -->
+    <View>
+      <Name>ADx.DomainController</Name>
+      <ViewSelectedBy>
+        <TypeName>ADx.DomainController</TypeName>
+      </ViewSelectedBy>
+      <ListControl>
+        <ListEntries>
+          <ListEntry>
+            <ListItems>
+              <ListItem><PropertyName>Name</PropertyName></ListItem>
+              <ListItem><PropertyName>HostName</PropertyName></ListItem>
+              <ListItem><PropertyName>Site</PropertyName></ListItem>
+              <ListItem><PropertyName>Domain</PropertyName></ListItem>
+              <ListItem><PropertyName>Forest</PropertyName></ListItem>
+              <ListItem><PropertyName>IsGlobalCatalog</PropertyName></ListItem>
+              <ListItem><PropertyName>IsReadOnly</PropertyName></ListItem>
+              <ListItem><PropertyName>OperatingSystem</PropertyName></ListItem>
+              <ListItem><PropertyName>OperationMasterRoles</PropertyName></ListItem>
+            </ListItems>
+          </ListEntry>
+        </ListEntries>
+      </ListControl>
+    </View>
+
+    <!-- ADx.RootDse: list view. This is a single diagnostic object, so a list reads
+         better than a table and leaves room for the full naming contexts. -->
+    <View>
+      <Name>ADx.RootDse</Name>
+      <ViewSelectedBy>
+        <TypeName>ADx.RootDse</TypeName>
+      </ViewSelectedBy>
+      <ListControl>
+        <ListEntries>
+          <ListEntry>
+            <ListItems>
+              <ListItem><PropertyName>Server</PropertyName></ListItem>
+              <ListItem><PropertyName>DnsHostName</PropertyName></ListItem>
+              <ListItem><PropertyName>DefaultNamingContext</PropertyName></ListItem>
+              <ListItem><PropertyName>ConfigurationNamingContext</PropertyName></ListItem>
+              <ListItem><PropertyName>SchemaNamingContext</PropertyName></ListItem>
+              <ListItem><PropertyName>HighestCommittedUsn</PropertyName></ListItem>
+              <ListItem><PropertyName>DomainControllerFunctionality</PropertyName></ListItem>
+              <ListItem><PropertyName>IsActiveDirectory</PropertyName></ListItem>
+              <ListItem><PropertyName>SupportsPagedResults</PropertyName></ListItem>
+              <ListItem><PropertyName>SupportsDirSync</PropertyName></ListItem>
+              <ListItem><PropertyName>SupportedControlCount</PropertyName></ListItem>
+            </ListItems>
+          </ListEntry>
+        </ListEntries>
+      </ListControl>
+    </View>
+
+  </ViewDefinitions>
+</Configuration>

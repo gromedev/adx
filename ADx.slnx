@@ -1,0 +1,6 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/ADx.Cmdlets/ADx.Cmdlets.csproj" />
+    <Project Path="src/ADx.Engine/ADx.Engine.csproj" />
+  </Folder>
+</Solution>

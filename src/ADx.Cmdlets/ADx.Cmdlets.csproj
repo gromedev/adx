@@ -1,0 +1,50 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>ADx.Cmdlets</RootNamespace>
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+    <!-- See ADx.Engine.csproj: CA1416 keeps Windows-only APIs out of the cross-platform
+         code paths at build time rather than at a customer's runtime. -->
+    <WarningsAsErrors>$(WarningsAsErrors);CA1416</WarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="ADx.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- ExcludeAssets="runtime" (not just PrivateAssets="all"): PrivateAssets stops this
+         reference's assets flowing to projects that reference ADx.Cmdlets, but does nothing
+         about ADx.Cmdlets' own build output. Without ExcludeAssets, CopyLocalLockFileAssemblies
+         copies not just System.Management.Automation.dll but its entire transitive graph
+         (System.DirectoryServices.dll, System.Management.dll, Microsoft.ApplicationInsights.dll,
+         etc.) into bin/ - the exact class of leak build.ps1's integrity check exists to catch.
+         pwsh 7.5.5's own app base already carries this identical package version, so only the
+         compile-time reference is needed. -->
+    <PackageReference Include="System.Management.Automation" Version="7.5.5"
+                      PrivateAssets="all" ExcludeAssets="runtime" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ADx.Engine\ADx.Engine.csproj" />
+  </ItemGroup>
+
+  <!-- Post-build: auto-stage DLLs into module/ so IDE builds are never stale.
+       Note there is no Dependencies/ folder here, unlike Mgx: ADx has no third-party runtime
+       dependencies at all, so it needs no ALC brokering and no AlcInitializer. -->
+  <Target Name="StageModuleOutput" AfterTargets="Build">
+    <PropertyGroup>
+      <ModuleRoot>$(MSBuildThisFileDirectory)..\..\module</ModuleRoot>
+    </PropertyGroup>
+
+    <Copy SourceFiles="$(TargetDir)ADx.Cmdlets.dll" DestinationFolder="$(ModuleRoot)" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="$(TargetDir)ADx.Engine.dll" DestinationFolder="$(ModuleRoot)" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="$(TargetDir)ADx.Cmdlets.pdb" DestinationFolder="$(ModuleRoot)" SkipUnchangedFiles="true" Condition="Exists('$(TargetDir)ADx.Cmdlets.pdb')" />
+    <Copy SourceFiles="$(TargetDir)ADx.Engine.pdb" DestinationFolder="$(ModuleRoot)" SkipUnchangedFiles="true" Condition="Exists('$(TargetDir)ADx.Engine.pdb')" />
+    <Copy SourceFiles="$(TargetDir)ADx.Cmdlets.deps.json" DestinationFolder="$(ModuleRoot)" SkipUnchangedFiles="true" Condition="Exists('$(TargetDir)ADx.Cmdlets.deps.json')" />
+  </Target>
+
+</Project>

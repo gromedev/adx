@@ -1,0 +1,41 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>ADx.Engine</RootNamespace>
+    <!-- CA1416: much of the Windows-only .NET surface (SecurityIdentifier,
+         System.DirectoryServices.*, registry) is [SupportedOSPlatform("windows")]. ADx runs on
+         Linux and macOS - that is half its value over RSAT - so promoting this to an error turns
+         a runtime PlatformNotSupportedException on a non-Windows collector into a build failure.
+         SID decoding is hand-rolled in LdapConvert.SidToSddl for exactly this reason. -->
+    <WarningsAsErrors>$(WarningsAsErrors);CA1416</WarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="ADx.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- LDAP transport.
+         ExcludeAssets="runtime" is load-bearing: this package is RID-split, and its portable
+         lib/net9.0 asset is a ~74 KB PlatformNotSupportedException stub. Without this,
+         CopyLocalLockFileAssemblies would drop that stub into bin/ where build.ps1 could stage
+         it and break every Windows host. We only need the compile-time reference - pwsh 7.5
+         already carries the RID-correct implementation in its app base (verified:
+         System.DirectoryServices.Protocols 9.0.0.10), and it resolves off the TPA list first.
+
+         Version is pinned to the 9.0.0 BASELINE, not the latest patch, and that is load-bearing
+         too. A compile-time reference becomes a minimum-version demand at runtime: referencing
+         9.0.14 emits a dependency on assembly 9.0.0.14 while PowerShell 7.5 ships 9.0.0.10. The
+         host cannot satisfy that, and every ADx cmdlet fails with FileNotFoundException before
+         doing any work - with a fully green build. Package 9.0.0 emits assembly 9.0.0.0, which
+         every .NET 9 servicing build satisfies.
+         Do not "update" this to a newer patch - it is a floor, not a preference.
+         ADx.Tests.ps1 has a guard test that fails if it drifts. -->
+    <PackageReference Include="System.DirectoryServices.Protocols" Version="9.0.0"
+                      ExcludeAssets="runtime" />
+  </ItemGroup>
+
+</Project>
