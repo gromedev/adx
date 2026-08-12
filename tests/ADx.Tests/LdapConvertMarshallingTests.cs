@@ -261,4 +261,30 @@ public class LdapConvertMarshallingTests
         Assert.Equal(LdapConvert.Interval(magnitude), LdapConvert.Interval(-magnitude));
         Assert.Equal(magnitude, LdapConvert.Interval(-magnitude)!.Value.Ticks);
     }
+
+    // --- Forced-binary retrieval: the client's byte[] set must cover the schema's declarations ---
+
+    [Fact]
+    public void ForcedBinarySet_CoversEverySchemaBinaryDeclaration()
+    {
+        // The failure this pins: an attribute declared Sid/Guid/Binary in the schema but
+        // missing from the client's forced-byte[] set is handed back as a string whenever
+        // its bytes decode as valid UTF-8, and the projector silently nulls it. The RBCD
+        // and gMSA-membership descriptors drifted exactly this way once.
+        foreach (var name in AdAttributeSchema.BinaryTransferAttributes)
+            Assert.Contains(name, ADxLdapClient.BinaryAttributes);
+    }
+
+    [Theory]
+    [InlineData("msDS-AllowedToActOnBehalfOfOtherIdentity")]
+    [InlineData("msDS-GroupMSAMembership")]
+    [InlineData("objectSid")]
+    [InlineData("objectGUID")]
+    [InlineData("sIDHistory")]
+    [InlineData("nTSecurityDescriptor")]
+    [InlineData("tokenGroups")]
+    public void ForcedBinarySet_ContainsTheAttributesThatCorruptAsStrings(string attribute)
+    {
+        Assert.Contains(attribute, ADxLdapClient.BinaryAttributes);
+    }
 }

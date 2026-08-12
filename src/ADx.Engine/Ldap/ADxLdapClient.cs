@@ -23,13 +23,15 @@ public sealed class ADxLdapClient : ILdapSearchExecutor
 {
     // Attributes AD returns as raw bytes. S.DS.Protocols surfaces values as strings when
     // they decode as UTF-8, which silently corrupts binary data, so these are forced.
-    private static readonly HashSet<string> BinaryAttributes = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "objectSid", "objectGUID", "sIDHistory", "tokenGroups", "thumbnailPhoto",
-        "jpegPhoto", "userCertificate", "msDS-KeyCredentialLink", "userParameters",
-        "logonHours", "schemaIDGUID", "attributeSecurityGUID", "nTSecurityDescriptor",
-        "invocationId"
-    };
+    // Seeded from the schema's Sid/Guid/Binary declarations so a new binary attribute only
+    // needs declaring once, plus the byte-valued attributes the schema has no entry for.
+    internal static readonly HashSet<string> BinaryAttributes = new(
+        AdAttributeSchema.BinaryTransferAttributes.Concat(new[]
+        {
+            "tokenGroups", "thumbnailPhoto", "jpegPhoto", "msDS-KeyCredentialLink",
+            "userParameters", "logonHours", "schemaIDGUID", "attributeSecurityGUID"
+        }),
+        StringComparer.OrdinalIgnoreCase);
 
     private readonly LdapConnection _connection;
     private readonly LdapClientOptions _options;

@@ -171,6 +171,22 @@ public static class AdAttributeSchema
                 : ldapAttributeName);
 
     /// <summary>
+    /// Every attribute whose wire value is bytes, not text: the <see cref="AdAttributeSyntax.Sid"/>,
+    /// <see cref="AdAttributeSyntax.Guid"/> and <see cref="AdAttributeSyntax.Binary"/> entries.
+    /// The LDAP client unions this into its forced-byte[] retrieval set, so declaring a new
+    /// binary attribute here is sufficient -- the client cannot drift out of sync with the
+    /// schema again (it did once: the RBCD and gMSA-membership security descriptors were
+    /// declared Binary here but missing from the client's hand-kept list, silently projecting
+    /// as null whenever the blob happened to decode as valid UTF-8).
+    /// </summary>
+    public static IReadOnlyCollection<string> BinaryTransferAttributes { get; } =
+        Syntax.Where(static kv => kv.Value is AdAttributeSyntax.Sid
+                                            or AdAttributeSyntax.Guid
+                                            or AdAttributeSyntax.Binary)
+              .Select(static kv => kv.Key)
+              .ToArray();
+
+    /// <summary>
     /// RSAT display name -&gt; LDAP attribute name, for every attribute in the plan's Common/
     /// User/Group/Computer property tables where the two names differ by more than case (the
     /// "classic trap" cases -- <c>EmailAddress</c>/<c>mail</c>, <c>Surname</c>/<c>sn</c>,
