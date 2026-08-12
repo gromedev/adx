@@ -1,6 +1,5 @@
 # ignore
 .vscode/
-.github/
 .DS_Store
 
 # tmp
@@ -8,7 +7,6 @@ bin/
 obj/
 publish/
 *.jsonl
-*.json
 *.zip
 
 # Build output.
@@ -17,4 +15,6 @@ publish/
 **/module/*.json
 **/module/Dependencies/
 **/module/.build-hash
+
+# Private agent-runner harness (never ship).
 tests/scripts/
