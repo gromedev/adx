@@ -17,3 +17,4 @@ publish/
 **/module/*.json
 **/module/Dependencies/
 **/module/.build-hash
+tests/scripts/
