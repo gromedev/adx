@@ -66,6 +66,11 @@ public sealed class GetADxRootDse : ADxCmdletBase
         catch (OperationCanceledException) when (CancellationToken.IsCancellationRequested)
         {
             DrainMessages();
+            WriteWarning("Search cancelled.");
+        }
+        catch (PipelineStoppedException)
+        {
+            throw;
         }
         catch (Exception ex) when (WriteLdapError(ex, Server)) { }
     }

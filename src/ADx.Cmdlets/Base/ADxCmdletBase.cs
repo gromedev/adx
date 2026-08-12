@@ -40,7 +40,6 @@ public abstract class ADxCmdletBase : ADxCmdletCore
 
     [Parameter]
     [ValidateSet("Negotiate", "Kerberos", "Basic", "Anonymous")]
-    [ArgumentCompleter(typeof(LdapAuthTypeCompleter))]
     public string AuthType { get; set; } = "Negotiate";
 
     /// <summary>
@@ -396,23 +395,5 @@ public abstract class ADxCmdletBase : ADxCmdletCore
     protected override void DisposeCore()
     {
         _client?.Dispose();
-    }
-}
-
-/// <summary>Tab completion for -AuthType.</summary>
-internal sealed class LdapAuthTypeCompleter : IArgumentCompleter
-{
-    private static readonly string[] Values = { "Negotiate", "Kerberos", "Basic", "Anonymous" };
-
-    public IEnumerable<CompletionResult> CompleteArgument(
-        string commandName, string parameterName, string wordToComplete,
-        System.Management.Automation.Language.CommandAst commandAst,
-        System.Collections.IDictionary fakeBoundParameters)
-    {
-        foreach (var v in Values)
-        {
-            if (v.StartsWith(wordToComplete ?? string.Empty, StringComparison.OrdinalIgnoreCase))
-                yield return new CompletionResult(v, v, CompletionResultType.ParameterValue, v);
-        }
     }
 }

@@ -80,7 +80,10 @@ public sealed class SearchADxObject : ADxCmdletBase
             maxItems = Top;
         else
         {
-            maxItems = PageSize;
+            // One past the page: the probe entry is never emitted, it only proves whether
+            // the single-page default actually cut the result set. Without it a query
+            // matching EXACTLY one page warned "stopped at one page" over a complete set.
+            maxItems = PageSize + 1;
             defaultedToPageSize = true;
         }
 
@@ -113,11 +116,17 @@ public sealed class SearchADxObject : ADxCmdletBase
             // Drive the async sequence from the pipeline thread. WriteObject and
             // WriteVerbose are only legal here, which is why page callbacks buffer
             // their messages and this loop drains them.
+            var truncated = false;
             var enumerator = enumerable.GetAsyncEnumerator(CancellationToken);
             try
             {
                 while (enumerator.MoveNextAsync().AsTask().GetAwaiter().GetResult())
                 {
+                    if (defaultedToPageSize && emitted == PageSize)
+                    {
+                        truncated = true;
+                        break;
+                    }
                     WriteObject(LdapEntryToPSObject(enumerator.Current, Raw.IsPresent));
                     emitted++;
 
@@ -133,10 +142,10 @@ public sealed class SearchADxObject : ADxCmdletBase
             DrainMessages();
             WriteVerbose($"Returned {emitted} entries in {sw.ElapsedMilliseconds} ms.");
 
-            if (defaultedToPageSize && emitted >= maxItems)
+            if (truncated)
             {
                 WriteWarning(
-                    $"Search stopped at {emitted} entries (one page). " +
+                    $"Search stopped at {emitted} entries (one page) with more available. " +
                     "Use -All to return everything, or -Top N for an explicit limit.");
             }
         }

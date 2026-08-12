@@ -16,16 +16,31 @@ namespace ADx.Cmdlets.Base;
 /// </summary>
 public abstract class ADxCmdletCore : PSCmdlet, IDisposable
 {
-    private CancellationTokenSource _cts = new();
+    private readonly CancellationTokenSource _cts = new();
+    private readonly CancellationToken _cancellationToken;
     private int _disposed; // 0 = not disposed, 1 = disposed (Interlocked for thread safety)
 
-    protected CancellationToken CancellationToken => _cts.Token;
+    protected ADxCmdletCore()
+    {
+        // Cached at construction, NOT read through _cts.Token on demand: StopProcessing
+        // disposes the CTS on the stopping thread while the pipeline thread is still
+        // unwinding its OperationCanceledException, and reading _cts.Token there throws
+        // ObjectDisposedException INSIDE the `when (CancellationToken.IsCancellationRequested)`
+        // catch filters -- a throwing filter is silently false, so the clean "Search
+        // cancelled" path fell through to the generic error handler. A copied token stays
+        // valid after its source is disposed.
+        _cancellationToken = _cts.Token;
+    }
+
+    protected CancellationToken CancellationToken => _cancellationToken;
 
     #region Lifecycle
 
     protected override void StopProcessing()
     {
-        _cts.Cancel();
+        // Cancel can race EndProcessing's Dispose; if that already won, there is nothing
+        // in flight left to cancel and the disposed CTS is fine to ignore.
+        try { _cts.Cancel(); } catch (ObjectDisposedException) { }
         Dispose();
     }
 

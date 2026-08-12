@@ -155,6 +155,7 @@ public sealed class SearchADxAccount : ADxCmdletBase
         catch (OperationCanceledException) when (CancellationToken.IsCancellationRequested)
         {
             DrainMessages();
+            WriteWarning("Search cancelled.");
         }
         catch (PipelineStoppedException)
         {

@@ -131,9 +131,10 @@ public abstract class ADxObjectCmdletBase : ADxCmdletBase
         // fetches a full 1000-entry page, emits one, and discards 999 -- measured at 82ms
         // against 31ms once the page is capped, on the same query returning the same object.
         // Only ever shrinks the page, so bulk enumeration (ResultSetSize 0 = unlimited) is
-        // untouched.
+        // untouched. The +1 is the truncation probe: one extra entry proves whether the cap
+        // cut the result set, and it rides inside the same page.
         var effectivePageSize = ResultSetSize > 0
-            ? Math.Min(ResultPageSize, ResultSetSize)
+            ? Math.Min(ResultPageSize, ResultSetSize + 1)
             : ResultPageSize;
 
         var spec = new LdapSearchSpec(
@@ -149,18 +150,25 @@ public abstract class ADxObjectCmdletBase : ADxCmdletBase
         var iterator = new LdapPageIterator(GetConnection());
         var enumerable = iterator.StreamAsync(
             spec,
-            maxItems: ResultSetSize,
+            // One past the cap: the extra entry only proves truncation and is never emitted.
+            maxItems: ResultSetSize > 0 ? ResultSetSize + 1 : 0,
             onPageComplete: info => EnqueueVerbose(
                 $"Page {info.PageIndex}: {info.EntriesInPage} entries ({info.TotalEmitted} total)."),
             skipFirst: 0,
             cancellationToken: CancellationToken);
 
         long emitted = 0;
+        var truncated = false;
         var enumerator = enumerable.GetAsyncEnumerator(CancellationToken);
         try
         {
             while (enumerator.MoveNextAsync().AsTask().GetAwaiter().GetResult())
             {
+                if (ResultSetSize > 0 && emitted == ResultSetSize)
+                {
+                    truncated = true;
+                    break;
+                }
                 WriteObject(AdRsatProjector.Project(
                     CompleteRangedAttributes(enumerator.Current), ObjectSchema, Properties, fetchAll));
                 emitted++;
@@ -173,6 +181,11 @@ public abstract class ADxObjectCmdletBase : ADxCmdletBase
         }
 
         DrainMessages();
+        if (truncated)
+            WriteWarning(
+                $"More objects match than -ResultSetSize {ResultSetSize}; the result set is truncated. " +
+                "A partial set that looks total is the failure this module exists to avoid -- raise " +
+                "-ResultSetSize, or drop it for the full set.");
         WriteVerbose($"Returned {emitted} {ObjectSchema.TypeLabel}(s).");
     }
 
