@@ -27,8 +27,6 @@ neither pays network latency, median of 5 runs with the warm-up discarded:
 | `-Filter *`, default properties | **0.41 s** | 1.13 s | **2.8x faster** |
 | `-Filter *`, `-Properties *` | **1.37 s** | 12.53 s | **9.1x faster** |
 
-Earlier versions of this README predicted "near parity on `-Properties *`", reasoning that the
-wire would be dominated by attribute bytes. That was wrong, and in the useful direction:
 `-Properties *` is where the gap is **widest**, because ADWS pays SOAP/XML serialisation per
 attribute while LDAP does not. Pulling every attribute for 3,732 users takes RSAT 12.5 seconds
 and ADx 1.4.
@@ -110,6 +108,9 @@ Import-Module ./module/adx.psd1
 | `Get-ADxDomain` | `Get-ADDomain` | Domain identity, FSMO holders, containers, replica DCs |
 | `Get-ADxForest` | `Get-ADForest` | Forest mode, schema/naming masters, domains, GCs, sites |
 | `Get-ADxDomainController` | `Get-ADDomainController` | Connected DC, one by `-Identity`, or all by `-Filter *` |
+| `Get-ADxServiceAccount` | `Get-ADServiceAccount` | Standalone and group-managed service accounts (gMSA/sMSA) |
+| `Get-ADxFineGrainedPasswordPolicy` | `Get-ADFineGrainedPasswordPolicy` | PSO objects; ages as `TimeSpan`, `AppliesTo` DN list |
+| `Search-ADxAccount` | `Search-ADAccount` | Accounts by state: disabled/expired/expiring/inactive/locked/pwd-expired |
 | `Get-ADxRootDse` | `Get-ADRootDSE` | Probe a DC: naming contexts, functional level, supported controls |
 | `Search-ADxObject` | — | Generic LDAP search with paging, `-All` streaming, range retrieval |
 
@@ -141,30 +142,6 @@ pwsh -NoProfile -File ./build.ps1 -Configuration Release
 ```
 
 ## Status
-
-0.2.6. Fourteen cmdlets. 0.2.6 completes the Tier-1 read surface with
-`Get-ADxOrganizationalUnit`, `Get-ADxDefaultDomainPasswordPolicy`, `Get-ADxDomain`,
-`Get-ADxForest`, and `Get-ADxDomainController`. The four topology cmdlets follow an
-honest-subset rule: every property is produced from a real read, and RSAT properties ADx cannot
-produce faithfully are omitted and documented, never returned as null. They are **live-validated
-against a real two-domain Server 2025 forest** from macOS over LDAPS — interval attributes as
-`TimeSpan`s, functional levels, well-known containers, FSMO-holder hostnames, and the
-multi-domain case where `Get-ADxForest` spans both domains' global catalogs (a foreign-partition
-computer read that returns a referral is tolerated, not fatal). The side-by-side RSAT
-`Compare-Object` parity diff still awaits a Windows/ADWS session; the `-Tag Live` suite carries
-those assertions. The scale, parity, and cross-platform results below predate 0.2.6 and cover the
-0.2.5 surface.
-
-The ninth cmdlet, `Get-ADxPrincipalGroupMembership`, with its Global-Catalog-aware
-cross-partition warning, landed in 0.2.5; the cross-domain member warning on `Get-ADxGroupMember`
-/ `Get-ADxGroupNested` landed in 0.2.4. The read presets, group membership
-(`Get-ADxGroupMember` / `Get-ADxGroupNested` / `Get-ADxPrincipalGroupMembership`), the `-Filter`
-translator, and range retrieval are all in. The speed figures above are measurements from a live
-domain controller, not expectations.
-
-**Validated against live DCs**, natively on Windows — both on a domain controller and on a
-non-DC domain-joined Windows 11 client, each under integrated auth with no `-Credential` — and
-cross-platform from macOS:
 
 - **At scale:** a 500,000-object domain. Client memory stays flat from 0→500k on default
   properties (~100 MB) and on `-Properties *` (~135 MB) — the streaming design's core claim,

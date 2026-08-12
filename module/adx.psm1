@@ -64,7 +64,8 @@ foreach ($cmd in 'Search-ADxObject') {
 }
 
 # The presets take RSAT-style property names (and LDAP names) in -Properties.
-foreach ($cmd in 'Get-ADxUser', 'Get-ADxGroup', 'Get-ADxComputer', 'Get-ADxObject', 'Get-ADxOrganizationalUnit') {
+foreach ($cmd in 'Get-ADxUser', 'Get-ADxGroup', 'Get-ADxComputer', 'Get-ADxObject', 'Get-ADxOrganizationalUnit',
+    'Get-ADxServiceAccount', 'Get-ADxFineGrainedPasswordPolicy') {
     Register-ArgumentCompleter -CommandName $cmd -ParameterName LDAPFilter -ScriptBlock $script:LdapFilterCompleter
     Register-ArgumentCompleter -CommandName $cmd -ParameterName Properties -ScriptBlock $script:LdapPropertyCompleter
 }

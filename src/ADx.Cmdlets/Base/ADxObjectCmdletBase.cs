@@ -117,7 +117,7 @@ public abstract class ADxObjectCmdletBase : ADxCmdletBase
 
     private void ProcessSearch()
     {
-        AdRsatProjector.ValidateRequestedProperties(Properties, AllowUnknownProperty.IsPresent);
+        AdRsatProjector.ValidateRequestedProperties(Properties, AllowUnknownProperty.IsPresent, ObjectSchema.AttributeOverrides);
 
         var ldapFilter = ParameterSetName == LdapFilterSet
             ? ComposeWithBaseFilter(new AdFilterRaw(LDAPFilter))
@@ -137,7 +137,7 @@ public abstract class ADxObjectCmdletBase : ADxCmdletBase
             : ResultPageSize;
 
         var spec = new LdapSearchSpec(
-            ResolveSearchBase(SearchBase),
+            ResolveEffectiveSearchBase(),
             ldapFilter,
             fetchList,
             Enum.TryParse<LdapScope>(SearchScope, ignoreCase: true, out var scope) ? scope : LdapScope.Subtree,
@@ -213,11 +213,29 @@ public abstract class ADxObjectCmdletBase : ADxCmdletBase
         return AdFilterEmitter.Emit(combined);
     }
 
+    /// <summary>
+    /// The search base: the caller's -SearchBase if given; otherwise the schema's default
+    /// container relative to the domain head (for types confined to one container, e.g. PSOs);
+    /// otherwise the domain's defaultNamingContext (via the base <see cref="ADxCmdletBase.ResolveSearchBase"/>).
+    /// </summary>
+    private string ResolveEffectiveSearchBase()
+    {
+        if (!string.IsNullOrWhiteSpace(SearchBase)) return SearchBase!.Trim();
+
+        if (ObjectSchema.DefaultContainerRelativeDn is { } relative)
+        {
+            var namingContext = GetConnection().RootDse.DefaultNamingContext;
+            if (!string.IsNullOrWhiteSpace(namingContext)) return $"{relative},{namingContext}";
+        }
+
+        return ResolveSearchBase(SearchBase);
+    }
+
     // ---- -Identity ----
 
     private void ProcessIdentity()
     {
-        AdRsatProjector.ValidateRequestedProperties(Properties, AllowUnknownProperty.IsPresent);
+        AdRsatProjector.ValidateRequestedProperties(Properties, AllowUnknownProperty.IsPresent, ObjectSchema.AttributeOverrides);
 
         var (kind, value) = AdIdentityResolver.Classify(Identity!, ObjectSchema);
         var fetchList = AdRsatProjector.BuildFetchList(
@@ -300,7 +318,7 @@ public abstract class ADxObjectCmdletBase : ADxCmdletBase
     private LdapEntry? RunIdentitySearch(AdFilterNode lookup, IReadOnlyList<string> fetchList)
     {
         var spec = new LdapSearchSpec(
-            ResolveSearchBase(SearchBase),
+            ResolveEffectiveSearchBase(),
             ComposeWithBaseFilter(lookup),
             EnsureObjectClassFetched(fetchList),
             LdapScope.Subtree,

@@ -53,6 +53,18 @@ namespace ADx.Engine.Ldap;
 /// -- resolving through the global table for such a name would fetch the wrong attribute
 /// and silently emit null, the exact failure class this module exists to prevent.
 /// </param>
+/// <param name="IdentityByName">
+/// Whether a bare-string <c>-Identity</c> that is not a DN/GUID/SID resolves by the object's
+/// <c>name</c> (cn) attribute. For types with no sAMAccountName -- fine-grained password
+/// policies -- whose RSAT cmdlet takes the object's name. Mutually exclusive with
+/// <see cref="IdentityIncludesSamAccountName"/> in practice.
+/// </param>
+/// <param name="DefaultContainerRelativeDn">
+/// When set and no <c>-SearchBase</c> is given, searches default to this container relative to
+/// the domain's defaultNamingContext (e.g. <c>CN=Password Settings Container,CN=System</c>),
+/// not the domain root -- matching RSAT's default base for a type confined to one container.
+/// Null (every other preset) keeps the domain-root default.
+/// </param>
 public sealed record AdObjectSchema(
     string TypeLabel,
     string? BaseFilter,
@@ -61,7 +73,9 @@ public sealed record AdObjectSchema(
     bool IdentityIncludesSamAccountName,
     bool IdentitySamTriesDollarSuffix,
     IReadOnlyList<string>? DisqualifyingClasses = null,
-    IReadOnlyDictionary<string, string>? AttributeOverrides = null)
+    IReadOnlyDictionary<string, string>? AttributeOverrides = null,
+    bool IdentityByName = false,
+    string? DefaultContainerRelativeDn = null)
 {
     public static readonly AdObjectSchema User = new(
         "user",
@@ -108,11 +122,90 @@ public sealed record AdObjectSchema(
         // chain-matching was introduced to eliminate, reintroduced in the other direction.
         DisqualifyingClasses: new[] { "msDS-GroupManagedServiceAccount", "msDS-ManagedServiceAccount" });
 
+    public static readonly AdObjectSchema ServiceAccount = new(
+        "serviceAccount",
+        // msDS-GroupManagedServiceAccount derives from msDS-ManagedServiceAccount, so the base
+        // CLASS matches BOTH the group-managed (derived) and standalone (own class) accounts and
+        // nothing else -- the one place a derived class SHOULD match, the inverse of the User row.
+        // objectCategory would not do: it holds each MSA's own most-specific category, which
+        // differs between gMSA and sMSA.
+        "(objectClass=msDS-ManagedServiceAccount)",
+        "msDS-ManagedServiceAccount",
+        new[]
+        {
+            "DistinguishedName", "Enabled", "Name", "ObjectClass", "ObjectGUID",
+            "SamAccountName", "SID", "UserPrincipalName"
+        },
+        IdentityIncludesSamAccountName: true,
+        IdentitySamTriesDollarSuffix: true);
+        // No DisqualifyingClasses: msDS-ManagedServiceAccount is present only on MSAs, so a plain
+        // computer/user is rejected by the RequiredClass check alone -- and the wire filter has no
+        // exclusion either, so the DN fast path and -Filter agree.
+
     public static readonly AdObjectSchema AnyObject = new(
         "object",
         BaseFilter: null,
         RequiredClass: null,
         new[] { "DistinguishedName", "Name", "ObjectClass", "ObjectGUID" },
+        IdentityIncludesSamAccountName: false,
+        IdentitySamTriesDollarSuffix: false);
+
+    /// <summary>
+    /// Fine-grained password policies (PSO, objectClass msDS-PasswordSettings), for
+    /// Get-ADxFineGrainedPasswordPolicy. Lives only in CN=Password Settings Container,CN=System
+    /// under the domain head, so the search base defaults there. Its RSAT display names collide
+    /// with the domain-head policy names (MaxPasswordAge etc.) but map to the msDS-* attributes,
+    /// so they are carried in AttributeOverrides (the OU StreetAddress pattern) rather than the
+    /// global alias table. Identity is by name (a PSO has no sAMAccountName), DN, or GUID.
+    /// </summary>
+    public static readonly AdObjectSchema FineGrainedPasswordPolicy = new(
+        "fineGrainedPasswordPolicy",
+        "(objectClass=msDS-PasswordSettings)",
+        "msDS-PasswordSettings",
+        new[]
+        {
+            "AppliesTo", "ComplexityEnabled", "DistinguishedName", "LockoutDuration",
+            "LockoutObservationWindow", "LockoutThreshold", "MaxPasswordAge", "MinPasswordAge",
+            "MinPasswordLength", "Name", "ObjectClass", "ObjectGUID", "PasswordHistoryCount",
+            "Precedence", "ReversibleEncryptionEnabled"
+        },
+        IdentityIncludesSamAccountName: false,
+        IdentitySamTriesDollarSuffix: false,
+        DisqualifyingClasses: null,
+        AttributeOverrides: new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Precedence"] = "msDS-PasswordSettingsPrecedence",
+            ["MinPasswordLength"] = "msDS-MinimumPasswordLength",
+            ["MinPasswordAge"] = "msDS-MinimumPasswordAge",
+            ["MaxPasswordAge"] = "msDS-MaximumPasswordAge",
+            ["PasswordHistoryCount"] = "msDS-PasswordHistoryLength",
+            ["LockoutThreshold"] = "msDS-LockoutThreshold",
+            ["LockoutDuration"] = "msDS-LockoutDuration",
+            ["LockoutObservationWindow"] = "msDS-LockoutObservationWindow",
+            ["ComplexityEnabled"] = "msDS-PasswordComplexityEnabled",
+            ["ReversibleEncryptionEnabled"] = "msDS-PasswordReversibleEncryptionEnabled",
+            ["AppliesTo"] = "msDS-PSOAppliesTo",
+        },
+        IdentityByName: true,
+        DefaultContainerRelativeDn: "CN=Password Settings Container,CN=System");
+
+    /// <summary>
+    /// The slim account shape returned by Search-ADxAccount: a mix of users and computers, so
+    /// the defaults are the intersection RSAT's ADAccount exposes (verified against a live DC --
+    /// RSAT's change-tracking bookkeeping properties, which a read-only module cannot produce,
+    /// are correctly absent). Projection-only: no base filter (the cmdlet builds its own scoped
+    /// criterion filter) and no identity path.
+    /// </summary>
+    public static readonly AdObjectSchema Account = new(
+        "account",
+        BaseFilter: null,
+        RequiredClass: null,
+        new[]
+        {
+            "AccountExpirationDate", "DistinguishedName", "Enabled", "LastLogonDate", "LockedOut",
+            "Name", "ObjectClass", "ObjectGUID", "PasswordExpired", "PasswordNeverExpires",
+            "SamAccountName", "SID", "UserPrincipalName"
+        },
         IdentityIncludesSamAccountName: false,
         IdentitySamTriesDollarSuffix: false);
 

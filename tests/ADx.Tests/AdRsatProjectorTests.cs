@@ -112,6 +112,7 @@ public class AdRsatProjectorTests
     [InlineData("IPv4Address")]
     [InlineData("ProtectedFromAccidentalDeletion")]
     [InlineData("PrincipalsAllowedToDelegateToAccount")]
+    [InlineData("PrincipalsAllowedToRetrieveManagedPassword")]
     public void DeclaredUnsupportedOutputProperties_AreRejectedExplicitly(string name)
     {
         // "Declare unsupported, don't return null": these must error even with the hatch open.
@@ -515,5 +516,83 @@ public class AdRsatProjectorTests
 
         Assert.Equal("Kongens Nytorv 1", Value(pso, "StreetAddress"));
         Assert.Equal("Kongens Nytorv 1", Value(pso, "street"));
+    }
+
+    // ---- 0.2.7: fine-grained password policy (PSO) projection ----
+
+    [Fact]
+    public void PsoProjection_MapsRsatNamesToMsDsAttributes_WithCorrectTypes()
+    {
+        var pso = Entry("CN=StrongPolicy,CN=Password Settings Container,CN=System,DC=corp,DC=com",
+            ("objectClass", new object[] { "top", "msDS-PasswordSettings" }),
+            ("name", new object[] { "StrongPolicy" }),
+            ("msDS-PasswordSettingsPrecedence", new object[] { "10" }),
+            ("msDS-MinimumPasswordLength", new object[] { "14" }),
+            // 30 days, stored negative (interval).
+            ("msDS-MaximumPasswordAge", new object[] { (-TimeSpan.FromDays(30).Ticks).ToString() }),
+            ("msDS-PasswordComplexityEnabled", new object[] { "TRUE" }),
+            ("msDS-PasswordReversibleEncryptionEnabled", new object[] { "FALSE" }),
+            ("msDS-PSOAppliesTo", new object[] { "CN=Admins,DC=corp,DC=com", "CN=Ops,DC=corp,DC=com" }));
+
+        var result = AdRsatProjector.Project(pso, AdObjectSchema.FineGrainedPasswordPolicy, null, false);
+
+        Assert.Equal("ADx.FineGrainedPasswordPolicy", result.TypeNames[0]);
+        Assert.Equal("StrongPolicy", Value(result, "Name"));
+        Assert.Equal(10L, Value(result, "Precedence"));
+        Assert.Equal(14L, Value(result, "MinPasswordLength"));
+        // Interval -> positive TimeSpan, exactly like the domain-head policy cmdlet.
+        Assert.Equal(TimeSpan.FromDays(30), Value(result, "MaxPasswordAge"));
+        Assert.Equal(true, Value(result, "ComplexityEnabled"));
+        Assert.Equal(false, Value(result, "ReversibleEncryptionEnabled"));
+    }
+
+    [Theory]
+    // A preset must accept its OWN default properties via -Properties. The PSO override-only
+    // names live only in the schema's AttributeOverrides, absent from the global tables, so
+    // validation must consult the overrides -- else the cmdlet rejects its own columns.
+    [InlineData("AppliesTo")]
+    [InlineData("Precedence")]
+    [InlineData("ComplexityEnabled")]
+    [InlineData("ReversibleEncryptionEnabled")]
+    [InlineData("MaxPasswordAge")]
+    public void PsoOverrideNames_AreValidProperties_WithoutTheEscapeHatch(string name)
+    {
+        // Must NOT throw, even with allowUnknown = false.
+        AdRsatProjector.ValidateRequestedProperties(
+            new[] { name }, allowUnknown: false,
+            AdObjectSchema.FineGrainedPasswordPolicy.AttributeOverrides);
+    }
+
+    [Fact]
+    public void OverrideValidation_DoesNotLeakToSchemasWithoutTheOverride()
+    {
+        // A PSO-only name is still rejected for a schema whose overrides don't include it.
+        Assert.Throws<AdFilterTranslationException>(() =>
+            AdRsatProjector.ValidateRequestedProperties(
+                new[] { "AppliesTo" }, allowUnknown: false, AdObjectSchema.User.AttributeOverrides));
+    }
+
+    [Fact]
+    public void PsoProjection_AppliesTo_IsAlwaysADnArray()
+    {
+        var multi = Entry("CN=P,CN=Password Settings Container,CN=System,DC=corp,DC=com",
+            ("objectClass", new object[] { "top", "msDS-PasswordSettings" }),
+            ("msDS-PSOAppliesTo", new object[] { "CN=A,DC=corp,DC=com", "CN=B,DC=corp,DC=com" }));
+        var single = Entry("CN=Q,CN=Password Settings Container,CN=System,DC=corp,DC=com",
+            ("objectClass", new object[] { "top", "msDS-PasswordSettings" }),
+            ("msDS-PSOAppliesTo", new object[] { "CN=A,DC=corp,DC=com" }));
+        var none = Entry("CN=R,CN=Password Settings Container,CN=System,DC=corp,DC=com",
+            ("objectClass", new object[] { "top", "msDS-PasswordSettings" }));
+
+        var m = Assert.IsType<string[]>(Value(
+            AdRsatProjector.Project(multi, AdObjectSchema.FineGrainedPasswordPolicy, null, false), "AppliesTo"));
+        var s = Assert.IsType<string[]>(Value(
+            AdRsatProjector.Project(single, AdObjectSchema.FineGrainedPasswordPolicy, null, false), "AppliesTo"));
+        var n = Assert.IsType<string[]>(Value(
+            AdRsatProjector.Project(none, AdObjectSchema.FineGrainedPasswordPolicy, null, false), "AppliesTo"));
+
+        Assert.Equal(2, m.Length);
+        Assert.Single(s);      // a single value must NOT collapse to a scalar
+        Assert.Empty(n);       // absent -> empty array, not null
     }
 }

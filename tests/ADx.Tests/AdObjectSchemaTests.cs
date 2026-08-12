@@ -65,6 +65,83 @@ public class AdObjectSchemaTests
     }
 
     [Fact]
+    public void ServiceAccountDefaults_FetchList_MatchesThePlanTable()
+    {
+        var list = AdRsatProjector.BuildFetchList(AdObjectSchema.ServiceAccount, null, false, out _);
+
+        // The Computer default fetch list minus dNSHostName.
+        Assert.Equal(
+            new[]
+            {
+                "distinguishedName", "userAccountControl", "name", "objectClass",
+                "objectGUID", "sAMAccountName", "objectSid", "userPrincipalName"
+            },
+            list);
+    }
+
+    [Fact]
+    public void FineGrainedPasswordPolicyDefaults_FetchList_UsesTheMsDsAttributes()
+    {
+        var list = AdRsatProjector.BuildFetchList(AdObjectSchema.FineGrainedPasswordPolicy, null, false, out _);
+
+        // In DefaultProperties order, each RSAT name resolved through the per-schema override to
+        // its msDS-* attribute (the collision-avoiding path, not the global domain-head names).
+        Assert.Equal(
+            new[]
+            {
+                "msDS-PSOAppliesTo", "msDS-PasswordComplexityEnabled", "distinguishedName",
+                "msDS-LockoutDuration", "msDS-LockoutObservationWindow", "msDS-LockoutThreshold",
+                "msDS-MaximumPasswordAge", "msDS-MinimumPasswordAge", "msDS-MinimumPasswordLength",
+                "name", "objectClass", "objectGUID", "msDS-PasswordHistoryLength",
+                "msDS-PasswordSettingsPrecedence", "msDS-PasswordReversibleEncryptionEnabled"
+            },
+            list);
+    }
+
+    [Fact]
+    public void AccountDefaults_FetchList_MatchesTheLiveRsatShape()
+    {
+        var list = AdRsatProjector.BuildFetchList(AdObjectSchema.Account, null, false, out _);
+
+        // Enabled and PasswordNeverExpires both collapse onto userAccountControl.
+        Assert.Equal(
+            new[]
+            {
+                "accountExpires", "distinguishedName", "userAccountControl", "lastLogonTimestamp",
+                "lockoutTime", "name", "objectClass", "objectGUID",
+                "msDS-User-Account-Control-Computed", "sAMAccountName", "objectSid", "userPrincipalName"
+            },
+            list);
+    }
+
+    [Fact]
+    public void ServiceAccount_MatchesBothMsaTypes_RejectsPlainComputer()
+    {
+        var gmsa = new[] { "top", "person", "organizationalPerson", "user", "computer",
+            "msDS-ManagedServiceAccount", "msDS-GroupManagedServiceAccount" };
+        var smsa = new[] { "top", "person", "organizationalPerson", "user", "computer",
+            "msDS-ManagedServiceAccount" };
+        var computer = new[] { "top", "person", "organizationalPerson", "user", "computer" };
+
+        Assert.True(AdObjectSchema.ServiceAccount.MatchesType(gmsa));
+        Assert.True(AdObjectSchema.ServiceAccount.MatchesType(smsa));
+        Assert.False(AdObjectSchema.ServiceAccount.MatchesType(computer));
+    }
+
+    [Fact]
+    public void FineGrainedPasswordPolicy_IdentityByName_AndDefaultContainer()
+    {
+        var pso = AdObjectSchema.FineGrainedPasswordPolicy;
+        Assert.False(pso.IdentityIncludesSamAccountName);
+        Assert.True(pso.IdentityByName);
+        Assert.Equal("CN=Password Settings Container,CN=System", pso.DefaultContainerRelativeDn);
+        Assert.Equal("msDS-MaximumPasswordAge", pso.AttributeOverrides!["MaxPasswordAge"]);
+        // The domain-head presets keep the global names -- no container default, no by-name.
+        Assert.False(AdObjectSchema.User.IdentityByName);
+        Assert.Null(AdObjectSchema.User.DefaultContainerRelativeDn);
+    }
+
+    [Fact]
     public void BaseFilters_MatchThePlan()
     {
         // objectCategory=person AND objectClass=user: objectCategory=user alone would also
@@ -73,7 +150,11 @@ public class AdObjectSchemaTests
         Assert.Equal("(objectCategory=group)", AdObjectSchema.Group.BaseFilter);
         Assert.Equal("(objectCategory=computer)", AdObjectSchema.Computer.BaseFilter);
         Assert.Equal("(objectCategory=organizationalUnit)", AdObjectSchema.OrganizationalUnit.BaseFilter);
+        // Service accounts match by BASE class (both gMSA and sMSA carry it).
+        Assert.Equal("(objectClass=msDS-ManagedServiceAccount)", AdObjectSchema.ServiceAccount.BaseFilter);
+        Assert.Equal("(objectClass=msDS-PasswordSettings)", AdObjectSchema.FineGrainedPasswordPolicy.BaseFilter);
         Assert.Null(AdObjectSchema.AnyObject.BaseFilter);
+        Assert.Null(AdObjectSchema.Account.BaseFilter); // Search-ADxAccount builds its own filter
     }
 
     [Fact]

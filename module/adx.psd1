@@ -1,6 +1,6 @@
 @{
     RootModule        = 'adx.psm1'
-    ModuleVersion     = '0.2.6'
+    ModuleVersion     = '0.2.7'
     GUID              = 'cd162d8a-384b-4915-9013-8d200fd7579e'
     Author            = 'Thomas Maillo Grome'
     CompanyName       = 'ADx'
@@ -22,6 +22,7 @@
         'Get-ADxDefaultDomainPasswordPolicy'
         'Get-ADxDomain'
         'Get-ADxDomainController'
+        'Get-ADxFineGrainedPasswordPolicy'
         'Get-ADxForest'
         'Get-ADxGroup'
         'Get-ADxGroupMember'
@@ -30,7 +31,9 @@
         'Get-ADxOrganizationalUnit'
         'Get-ADxPrincipalGroupMembership'
         'Get-ADxRootDse'
+        'Get-ADxServiceAccount'
         'Get-ADxUser'
+        'Search-ADxAccount'
         'Search-ADxObject'
     )
 
@@ -44,6 +47,17 @@
             LicenseUri   = 'https://github.com/gromedev/adx/blob/main/LICENSE'
             ProjectUri   = 'https://github.com/gromedev/adx'
             ReleaseNotes = @'
+v0.2.7 - Three more read cmdlets: service accounts, fine-grained policies, account search
+- Get-ADxServiceAccount (Get-ADServiceAccount): standalone and group-managed service accounts,
+  matched by their shared base class; the gMSA password-retrieval ACL is declared unsupported
+- Get-ADxFineGrainedPasswordPolicy (Get-ADFineGrainedPasswordPolicy): PSO objects, ages as
+  TimeSpans, AppliesTo as a DN list; identity by policy name, DN, or GUID; searches default to
+  the Password Settings Container
+- Search-ADxAccount (Search-ADAccount): switch-driven account finder --
+  -AccountDisabled/-AccountExpired/-AccountExpiring/-AccountInactive/-LockedOut/-PasswordExpired/
+  -PasswordNeverExpires, scoped by -UsersOnly/-ComputersOnly. -PasswordExpired is filtered
+  client-side because its bit lives in a constructed attribute AD cannot search on
+
 v0.2.6 - Tier-1 completion: five RSAT-compatible read cmdlets
 - Get-ADxOrganizationalUnit (Get-ADOrganizationalUnit): DN/GUID identity, LinkedGroupPolicyObjects
   parsed from gPLink, and StreetAddress read from the OU 'street' attribute (a per-type mapping,

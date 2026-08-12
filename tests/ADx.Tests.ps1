@@ -20,7 +20,7 @@ Describe 'Module Loading' {
         (Get-Module ADx).Version | Should -Be $manifest.ModuleVersion
     }
 
-    It 'Should export exactly 14 cmdlets' {
+    It 'Should export exactly 17 cmdlets' {
         # Filtered to -CommandType Cmdlet on purpose: Get-Command -Module also counts
         # exported functions, so an unfiltered count would drift for reasons that have
         # nothing to do with the compiled surface.
@@ -29,6 +29,7 @@ Describe 'Module Loading' {
         $commands | Should -Contain 'Get-ADxDefaultDomainPasswordPolicy'
         $commands | Should -Contain 'Get-ADxDomain'
         $commands | Should -Contain 'Get-ADxDomainController'
+        $commands | Should -Contain 'Get-ADxFineGrainedPasswordPolicy'
         $commands | Should -Contain 'Get-ADxForest'
         $commands | Should -Contain 'Get-ADxGroup'
         $commands | Should -Contain 'Get-ADxGroupMember'
@@ -37,9 +38,11 @@ Describe 'Module Loading' {
         $commands | Should -Contain 'Get-ADxOrganizationalUnit'
         $commands | Should -Contain 'Get-ADxPrincipalGroupMembership'
         $commands | Should -Contain 'Get-ADxRootDse'
+        $commands | Should -Contain 'Get-ADxServiceAccount'
         $commands | Should -Contain 'Get-ADxUser'
+        $commands | Should -Contain 'Search-ADxAccount'
         $commands | Should -Contain 'Search-ADxObject'
-        $commands | Should -HaveCount 14
+        $commands | Should -HaveCount 17
     }
 
     It 'Should carry no Graph dependency' {
@@ -74,7 +77,7 @@ Describe 'Preset parameter surface' {
 
     BeforeDiscovery {
         $script:PresetNames = 'Get-ADxUser', 'Get-ADxGroup', 'Get-ADxComputer', 'Get-ADxObject',
-            'Get-ADxOrganizationalUnit'
+            'Get-ADxOrganizationalUnit', 'Get-ADxServiceAccount', 'Get-ADxFineGrainedPasswordPolicy'
     }
 
     It '<_> defaults to the Filter set with Identity as the only positional' -ForEach $PresetNames {
@@ -251,14 +254,16 @@ Describe 'Formatting' {
         $names = $xml.Configuration.ViewDefinitions.View.Name
         $names | Should -Contain 'ADx.Entry'
         $names | Should -Contain 'ADx.RootDse'
-        foreach ($type in 'ADx.User', 'ADx.Group', 'ADx.Computer', 'ADx.Object', 'ADx.OrganizationalUnit') {
+        foreach ($type in 'ADx.User', 'ADx.Group', 'ADx.Computer', 'ADx.Object', 'ADx.OrganizationalUnit',
+            'ADx.ServiceAccount') {
             $names | Should -Contain $type
         }
     }
 
     It 'Preset views are lists, matching how RSAT renders these objects' {
         $xml = [xml](Get-Content (Join-Path $PSScriptRoot '../module/adx.Format.ps1xml') -Raw)
-        foreach ($type in 'ADx.User', 'ADx.Group', 'ADx.Computer', 'ADx.Object', 'ADx.OrganizationalUnit') {
+        foreach ($type in 'ADx.User', 'ADx.Group', 'ADx.Computer', 'ADx.Object', 'ADx.OrganizationalUnit',
+            'ADx.ServiceAccount') {
             $view = $xml.Configuration.ViewDefinitions.View | Where-Object Name -eq $type
             $view.ListControl | Should -Not -BeNullOrEmpty -Because "$type should render as a list"
         }
@@ -272,7 +277,8 @@ Describe 'Formatting' {
 
     It 'Topology views exist and are lists' {
         $xml = [xml](Get-Content (Join-Path $PSScriptRoot '../module/adx.Format.ps1xml') -Raw)
-        foreach ($type in 'ADx.DefaultDomainPasswordPolicy', 'ADx.Domain', 'ADx.Forest', 'ADx.DomainController') {
+        foreach ($type in 'ADx.DefaultDomainPasswordPolicy', 'ADx.Domain', 'ADx.Forest', 'ADx.DomainController',
+            'ADx.FineGrainedPasswordPolicy', 'ADx.Account') {
             $view = $xml.Configuration.ViewDefinitions.View | Where-Object Name -eq $type
             $view | Should -Not -BeNullOrEmpty -Because "$type needs a view"
             $view.ListControl | Should -Not -BeNullOrEmpty -Because "$type should render as a list"
@@ -297,6 +303,27 @@ Describe 'Topology cmdlet surface' {
         $params.ContainsKey('Credential') | Should -BeTrue
     }
 
+    It 'Search-ADxAccount is switch-driven with no Filter/Identity/Properties' {
+        $cmd = Get-Command Search-ADxAccount
+        $p = $cmd.Parameters
+        # The criterion IS the filter; RSAT has no -Filter/-Identity/-Properties here.
+        $p.ContainsKey('Filter') | Should -BeFalse
+        $p.ContainsKey('LDAPFilter') | Should -BeFalse
+        $p.ContainsKey('Identity') | Should -BeFalse
+        $p.ContainsKey('Properties') | Should -BeFalse
+        # The seven mutually-exclusive criterion switches, each its own parameter set.
+        foreach ($sw in 'AccountDisabled','AccountExpired','AccountExpiring','AccountInactive',
+            'LockedOut','PasswordExpired','PasswordNeverExpires') {
+            $p.ContainsKey($sw) | Should -BeTrue -Because "criterion -$sw must exist"
+        }
+        ($cmd.ParameterSets.Name | Sort-Object) | Should -Be (@(
+            'AccountDisabled','AccountExpired','AccountExpiring','AccountInactive',
+            'LockedOut','PasswordExpired','PasswordNeverExpires') | Sort-Object)
+        # -DateTime / -TimeSpan exist only for the two windowed criteria.
+        $p.ContainsKey('DateTime') | Should -BeTrue
+        $p.ContainsKey('TimeSpan') | Should -BeTrue
+    }
+
     It 'Get-ADxDomainController has Identity (positional 0), Filter, and Discover' {
         $cmd = Get-Command Get-ADxDomainController
         $cmd.DefaultParameterSet | Should -Be 'Identity'
@@ -317,7 +344,8 @@ Describe 'Help' {
         'Get-ADxRootDse', 'Get-ADxUser', 'Get-ADxGroup', 'Get-ADxComputer', 'Get-ADxObject',
         'Get-ADxGroupMember', 'Get-ADxGroupNested', 'Get-ADxPrincipalGroupMembership', 'Search-ADxObject',
         'Get-ADxOrganizationalUnit', 'Get-ADxDefaultDomainPasswordPolicy', 'Get-ADxDomain',
-        'Get-ADxForest', 'Get-ADxDomainController'
+        'Get-ADxForest', 'Get-ADxDomainController',
+        'Get-ADxServiceAccount', 'Get-ADxFineGrainedPasswordPolicy', 'Search-ADxAccount'
     ) {
         $help = Get-Help $_
         # Autogenerated help has an empty description; MAML-backed help carries the one
@@ -331,7 +359,8 @@ Describe 'Help' {
         'Get-ADxUser', 'Get-ADxGroup', 'Get-ADxComputer', 'Get-ADxObject',
         'Get-ADxGroupMember', 'Get-ADxGroupNested', 'Get-ADxPrincipalGroupMembership',
         'Get-ADxOrganizationalUnit', 'Get-ADxDefaultDomainPasswordPolicy', 'Get-ADxDomain',
-        'Get-ADxForest', 'Get-ADxDomainController'
+        'Get-ADxForest', 'Get-ADxDomainController',
+        'Get-ADxServiceAccount', 'Get-ADxFineGrainedPasswordPolicy', 'Search-ADxAccount'
     ) {
         (Get-Help $_).examples.example | Should -Not -BeNullOrEmpty
     }

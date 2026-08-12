@@ -1,5 +1,49 @@
 # Changelog
 
+## 0.2.7 — 2026-08-12
+
+### Added — three more read cmdlets (service accounts, fine-grained policies, account search)
+
+`Get-ADxServiceAccount`, `Get-ADxFineGrainedPasswordPolicy`, and `Search-ADxAccount` — drop-ins
+for `Get-ADServiceAccount`, `Get-ADFineGrainedPasswordPolicy`, and `Search-ADAccount`. Seventeen
+cmdlets total.
+
+`Get-ADxServiceAccount` closes a promise the module already made: `Get-ADxUser`/`Get-ADxComputer`
+reject managed service accounts and point at this cmdlet, which now exists. Standalone (sMSA) and
+group-managed (gMSA) accounts are matched by their shared base class `msDS-ManagedServiceAccount`
+— which a gMSA inherits — so one filter returns both and nothing else. The gMSA
+password-retrieval ACL (`PrincipalsAllowedToRetrieveManagedPassword`) is declared unsupported: a
+security descriptor whose trustees RSAT resolves to principals, the same gap as the delegation ACL.
+
+`Get-ADxFineGrainedPasswordPolicy` reads PSO objects (`msDS-PasswordSettings`) from the Password
+Settings Container, reusing 0.2.6's interval handling so the ages come back as `TimeSpan`s.
+`AppliesTo` is the forward-linked DN list. Identity resolves by policy name, DN, or GUID — the
+first cmdlet to resolve identity by `name`, a small general addition to the resolver.
+
+`Search-ADxAccount` is switch-driven, matching RSAT: `-AccountDisabled`, `-AccountExpired`,
+`-AccountExpiring`, `-AccountInactive`, `-LockedOut`, `-PasswordExpired`, `-PasswordNeverExpires`,
+each its own parameter set, scoped by `-UsersOnly`/`-ComputersOnly`. Every criterion emits a
+specific LDAP filter (UAC bit-tests, FILETIME range bounds, `lockoutTime`) except
+`-PasswordExpired`: its bit lives in the constructed `msDS-User-Account-Control-Computed`, which
+AD cannot match in a search filter, so that one criterion reads the in-scope population and
+filters each object client-side. The window boundaries are directional (`-AccountExpiring` looks
+forward, `-AccountInactive` back), and getting one inverted would be a zero-row success — so each
+is pinned by an exact golden filter test.
+
+Three of RSAT's `Search-ADAccount` behaviours turned out to differ from their documentation and
+were corrected against a live DC: `-AccountInactive` **includes** never-logged-on accounts (no
+`lastLogonTimestamp`); `-PasswordExpired` **excludes** must-change-at-next-logon accounts
+(`pwdLastSet = 0`) even though they set the same computed bit that `Get-ADUser`'s PasswordExpired
+property reports — a divergence within RSAT itself, so Search matches Search; and the unscoped
+default population is every account (`objectClass=user`), which **includes managed service
+accounts**, not just users and computers.
+
+### Live validation
+Validated natively on the DC under integrated auth with full RSAT parity: `Get-ADxServiceAccount`
+(every field of all three lab gMSAs), `Get-ADxFineGrainedPasswordPolicy` (every field of a seeded
+PSO including `AppliesTo` and identity-by-name), and `Search-ADxAccount` (every criterion's result
+set matches `Search-ADAccount` exactly, all scopes).
+
 ## 0.2.6 — 2026-08-12
 
 ### Added — five RSAT-compatible read cmdlets (Tier-1 completion)
@@ -46,17 +90,21 @@ from 0.2.5); it now has one like the other membership cmdlets.
 
 ### Live validation
 Validated against a real two-domain forest (Windows Server 2025 DCs, `pentest.lab` +
-`child.pentest.lab`) from macOS over LDAPS. Every value pinned from documentation was confirmed:
-the interval attributes come back as positive `TimeSpan`s, the functional levels decode to
-`Windows2016Domain`/`Windows2016Forest` (Server 2025 adds no new level), the well-known
-containers parse correctly, and the FSMO holders resolve to hostnames. The multi-domain case is
-confirmed: bound to the forest-root DC, `Get-ADxForest` returns both domains and both global
-catalogs — including the child domain's, whose computer object lives in an unhosted partition and
-returns an LDAP referral that the DC enumeration now tolerates instead of aborting.
+`child.pentest.lab`). First from macOS over LDAPS, then **natively on the domain controller under
+integrated auth with full RSAT side-by-side parity**: every shared field of all five cmdlets
+matches `Get-AD*` exactly (50 of 50 checked, zero diffs) — the interval `TimeSpan`s, the domain
+SID, the `Windows2016Domain`/`Windows2016Forest` modes (Server 2025 adds no new level), every
+FSMO holder resolved to a hostname, all eight well-known containers, the replica lists, the
+forest spanning both domains' global catalogs, the DC's `OperationMasterRoles`/`IsReadOnly`/
+`IsGlobalCatalog`, and the OU's linked-GPO DN. The OU default property name set matches RSAT's
+read surface exactly (RSAT's change-tracking bookkeeping properties are correctly absent from a
+read-only module). The multi-domain machinery is confirmed both directions: bound to the root DC,
+`Get-ADxForest` spans both domains and both GCs (the child DC's computer object is in an unhosted
+partition and returns a referral the enumeration now tolerates rather than aborting), and
+`Get-ADxDomain` against the child resolves `ParentDomain` back to the root.
 
-Still pending a Windows session: the side-by-side RSAT `Compare-Object` parity diff (ADWS is not
-reachable off the DC). The `-Tag Live` suite carries the parity assertions, self-skipped where
-the ActiveDirectory module is absent.
+Not exercised (fixture gap, not a code gap): a read-only domain controller for the `IsReadOnly`
+= true path — the lab has no RODC. The `-Tag Live` suite carries the full parity assertions.
 
 ## 0.2.5 — 2026-08-11
 

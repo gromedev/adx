@@ -33,6 +33,9 @@ internal static class AdRsatProjector
     {
         "PrimaryGroup", "IPv4Address", "IPv6Address", "ProtectedFromAccidentalDeletion",
         "PrincipalsAllowedToDelegateToAccount", "KerberosEncryptionType", "CompoundIdentitySupported",
+        // A gMSA's msDS-GroupMSAMembership is a security descriptor whose trustees RSAT resolves
+        // to principals -- an ACE walk + SID join, the same gap as the delegate ACL above.
+        "PrincipalsAllowedToRetrieveManagedPassword",
     };
 
     /// <summary>
@@ -43,6 +46,9 @@ internal static class AdRsatProjector
     {
         "memberOf", "member", "servicePrincipalName", "proxyAddresses", "sIDHistory",
         "userCertificate", "description",
+        // A PSO's AppliesTo and a service account's HostComputers are multi-valued DN lists that
+        // scripts index and Count, so a single value must not collapse to a scalar.
+        "msDS-PSOAppliesTo", "msDS-HostServiceAccountBL",
     };
 
     /// <summary>
@@ -179,7 +185,9 @@ internal static class AdRsatProjector
     /// error before any query runs: AD itself ignores unknown attributes in the requested
     /// list and the emitted column would just be null -- RSAT errors here, and so do we.
     /// </summary>
-    public static void ValidateRequestedProperties(string[]? extraProperties, bool allowUnknown)
+    public static void ValidateRequestedProperties(
+        string[]? extraProperties, bool allowUnknown,
+        IReadOnlyDictionary<string, string>? attributeOverrides = null)
     {
         if (extraProperties is null) return;
 
@@ -198,6 +206,10 @@ internal static class AdRsatProjector
 
             if (OutputSynthetics.Contains(name)) continue;
             if (AdSyntheticProperties.TryGetUacBit(name, out _, out _)) continue;
+            // Per-schema override names (a PSO's AppliesTo/Precedence, an OU's StreetAddress) are
+            // valid for THAT type but deliberately absent from the global tables, so check them
+            // before the global resolver -- else a preset would reject its own default property.
+            if (attributeOverrides?.ContainsKey(name) == true) continue;
             if (AdAttributeSchema.TryResolveAttributeName(name, out _)) continue;
 
             if (!allowUnknown)

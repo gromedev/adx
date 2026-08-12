@@ -41,6 +41,18 @@ public class AdAttributeSchemaTests
     [InlineData("gPLink", AdAttributeSyntax.String)]
     [InlineData("street", AdAttributeSyntax.String)]
     [InlineData("ou", AdAttributeSyntax.String)]
+    // 0.2.7: fine-grained password policy (PSO) attributes.
+    [InlineData("msDS-MaximumPasswordAge", AdAttributeSyntax.Interval)]
+    [InlineData("msDS-LockoutObservationWindow", AdAttributeSyntax.Interval)]
+    [InlineData("msDS-PasswordSettingsPrecedence", AdAttributeSyntax.Integer)]
+    [InlineData("msDS-MinimumPasswordLength", AdAttributeSyntax.Integer)]
+    [InlineData("msDS-PasswordComplexityEnabled", AdAttributeSyntax.Boolean)]
+    [InlineData("msDS-PasswordReversibleEncryptionEnabled", AdAttributeSyntax.Boolean)]
+    [InlineData("msDS-PSOAppliesTo", AdAttributeSyntax.Dn)]
+    // 0.2.7: service account attributes.
+    [InlineData("msDS-ManagedPasswordInterval", AdAttributeSyntax.Integer)]
+    [InlineData("msDS-HostServiceAccountBL", AdAttributeSyntax.Dn)]
+    [InlineData("msDS-GroupMSAMembership", AdAttributeSyntax.Binary)]
     public void SyntaxOf_KnownAttributes(string attribute, AdAttributeSyntax expected)
     {
         Assert.Equal(expected, AdAttributeSchema.SyntaxOf(attribute));

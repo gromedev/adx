@@ -72,6 +72,13 @@ public static class AdAttributeSchema
             ["lockoutDuration"] = AdAttributeSyntax.Interval,
             ["lockOutObservationWindow"] = AdAttributeSyntax.Interval,
 
+            // Fine-grained password policy (PSO) durations: the msDS-* equivalents, same
+            // negative-100ns-interval syntax as the domain-head family above.
+            ["msDS-MinimumPasswordAge"] = AdAttributeSyntax.Interval,
+            ["msDS-MaximumPasswordAge"] = AdAttributeSyntax.Interval,
+            ["msDS-LockoutDuration"] = AdAttributeSyntax.Interval,
+            ["msDS-LockoutObservationWindow"] = AdAttributeSyntax.Interval,
+
             // Integer: plain numeric attributes, including bit-packed flag fields whose
             // decoding into named booleans is the projector's job, not the schema's.
             ["userAccountControl"] = AdAttributeSyntax.Integer,
@@ -91,6 +98,11 @@ public static class AdAttributeSchema
             ["pwdHistoryLength"] = AdAttributeSyntax.Integer,
             ["lockoutThreshold"] = AdAttributeSyntax.Integer,
             ["pwdProperties"] = AdAttributeSyntax.Integer,
+            ["msDS-PasswordSettingsPrecedence"] = AdAttributeSyntax.Integer,
+            ["msDS-MinimumPasswordLength"] = AdAttributeSyntax.Integer,
+            ["msDS-PasswordHistoryLength"] = AdAttributeSyntax.Integer,
+            ["msDS-LockoutThreshold"] = AdAttributeSyntax.Integer,
+            ["msDS-ManagedPasswordInterval"] = AdAttributeSyntax.Integer,
             ["msDS-Behavior-Version"] = AdAttributeSyntax.Integer,
             ["systemFlags"] = AdAttributeSyntax.Integer,
             ["options"] = AdAttributeSyntax.Integer,
@@ -100,6 +112,10 @@ public static class AdAttributeSchema
             // Boolean.
             ["isDeleted"] = AdAttributeSyntax.Boolean,
             ["isCriticalSystemObject"] = AdAttributeSyntax.Boolean,
+            // PSO complexity/reversible-encryption are their OWN boolean attributes, not bits of
+            // a pwdProperties field like the domain default policy.
+            ["msDS-PasswordComplexityEnabled"] = AdAttributeSyntax.Boolean,
+            ["msDS-PasswordReversibleEncryptionEnabled"] = AdAttributeSyntax.Boolean,
 
             // Sid: binary objectSid/sIDHistory, decoded/encoded by LdapConvert's hand-rolled
             // SDDL codec rather than the Windows-only SecurityIdentifier.
@@ -123,10 +139,15 @@ public static class AdAttributeSchema
             ["msDS-AssignedAuthNPolicy"] = AdAttributeSyntax.Dn,
             ["msDS-AssignedAuthNPolicySilo"] = AdAttributeSyntax.Dn,
             ["msDS-AllowedToActOnBehalfOfOtherIdentity"] = AdAttributeSyntax.Binary,
+            ["msDS-PSOAppliesTo"] = AdAttributeSyntax.Dn,
+            ["msDS-HostServiceAccountBL"] = AdAttributeSyntax.Dn,
 
             // Binary: opaque byte blobs with no textual form.
             ["userCertificate"] = AdAttributeSyntax.Binary,
             ["nTSecurityDescriptor"] = AdAttributeSyntax.Binary,
+            // The gMSA password-retrieval ACL: a security descriptor, surfaced raw as bytes;
+            // its friendly name PrincipalsAllowedToRetrieveManagedPassword is declared unsupported.
+            ["msDS-GroupMSAMembership"] = AdAttributeSyntax.Binary,
         };
 
     /// <summary>
@@ -212,6 +233,12 @@ public static class AdAttributeSchema
             ["MinPasswordAge"] = "minPwdAge",
             ["MinPasswordLength"] = "minPwdLength",
             ["PasswordHistoryCount"] = "pwdHistoryLength",
+
+            // Service accounts. The PSO display names (Precedence, ComplexityEnabled, ...) are
+            // NOT aliased here -- they collide with the domain-head names above and are carried
+            // per-type in AdObjectSchema.FineGrainedPasswordPolicy.AttributeOverrides instead.
+            ["ManagedPasswordIntervalInDays"] = "msDS-ManagedPasswordInterval",
+            ["HostComputers"] = "msDS-HostServiceAccountBL",
         };
 
     /// <summary>
@@ -258,6 +285,16 @@ public static class AdAttributeSchema
         "wellKnownObjects", "otherWellKnownObjects", "systemFlags", "options",
         "uPNSuffixes", "msDS-SPNSuffixes", "msDS-AllowedDNSSuffixes", "serverReference",
         "invocationId", "ms-DS-MachineAccountQuota", "nTMixedDomain",
+
+        // Fine-grained password policies (PSO).
+        "msDS-PasswordSettingsPrecedence", "msDS-MinimumPasswordLength",
+        "msDS-MinimumPasswordAge", "msDS-MaximumPasswordAge", "msDS-PasswordHistoryLength",
+        "msDS-LockoutThreshold", "msDS-LockoutDuration", "msDS-LockoutObservationWindow",
+        "msDS-PasswordComplexityEnabled", "msDS-PasswordReversibleEncryptionEnabled",
+        "msDS-PSOAppliesTo",
+
+        // Service accounts.
+        "msDS-ManagedPasswordInterval", "msDS-HostServiceAccountBL", "msDS-GroupMSAMembership",
     };
 
     private static readonly Dictionary<string, string> LdapToRsatAlias = BuildReverseAliasMap();

@@ -11,7 +11,14 @@ internal enum AdIdentityKind
     DistinguishedName,
     ObjectGuid,
     Sid,
-    SamAccountName
+    SamAccountName,
+
+    /// <summary>
+    /// Resolution by the object's <c>name</c> (cn) attribute, for types that have no
+    /// sAMAccountName or objectSid -- fine-grained password policies (PSOs), whose RSAT
+    /// cmdlet takes the policy name as its identity.
+    /// </summary>
+    Name
 }
 
 /// <summary>
@@ -98,12 +105,16 @@ internal static class AdIdentityResolver
         if (SidPattern.IsMatch(trimmed))
             return (AdIdentityKind.Sid, trimmed);
 
-        if (!schema.IdentityIncludesSamAccountName)
-            throw new AdFilterTranslationException(
-                $"'{identity}' is not a distinguished name or objectGUID. Get-ADx{char.ToUpperInvariant(schema.TypeLabel[0])}{schema.TypeLabel.Substring(1)} " +
-                "accepts only those identity forms, matching its RSAT counterpart.");
+        if (schema.IdentityIncludesSamAccountName)
+            return (AdIdentityKind.SamAccountName, trimmed);
 
-        return (AdIdentityKind.SamAccountName, trimmed);
+        // Types with no sAMAccountName but a unique name within their container (PSOs).
+        if (schema.IdentityByName)
+            return (AdIdentityKind.Name, trimmed);
+
+        throw new AdFilterTranslationException(
+            $"'{identity}' is not a distinguished name or objectGUID. Get-ADx{char.ToUpperInvariant(schema.TypeLabel[0])}{schema.TypeLabel.Substring(1)} " +
+            "accepts only those identity forms, matching its RSAT counterpart.");
     }
 
     /// <summary>
@@ -128,6 +139,9 @@ internal static class AdIdentityResolver
             case AdIdentityKind.SamAccountName:
                 return new AdFilterEquality("sAMAccountName",
                     LdapAssertionValue.Exact((string)value));
+
+            case AdIdentityKind.Name:
+                return new AdFilterEquality("name", LdapAssertionValue.Exact((string)value));
 
             default:
                 throw new InvalidOperationException($"No lookup filter for identity kind {kind}.");

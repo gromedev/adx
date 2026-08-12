@@ -263,6 +263,85 @@
       </ListControl>
     </View>
 
+    <!-- ADx.ServiceAccount: list view like the other object presets. -->
+    <View>
+      <Name>ADx.ServiceAccount</Name>
+      <ViewSelectedBy>
+        <TypeName>ADx.ServiceAccount</TypeName>
+      </ViewSelectedBy>
+      <ListControl>
+        <ListEntries>
+          <ListEntry>
+            <ListItems>
+              <ListItem><PropertyName>DistinguishedName</PropertyName></ListItem>
+              <ListItem><PropertyName>Enabled</PropertyName></ListItem>
+              <ListItem><PropertyName>Name</PropertyName></ListItem>
+              <ListItem><PropertyName>ObjectClass</PropertyName></ListItem>
+              <ListItem><PropertyName>ObjectGUID</PropertyName></ListItem>
+              <ListItem><PropertyName>SamAccountName</PropertyName></ListItem>
+              <ListItem><PropertyName>SID</PropertyName></ListItem>
+              <ListItem><PropertyName>UserPrincipalName</PropertyName></ListItem>
+            </ListItems>
+          </ListEntry>
+        </ListEntries>
+      </ListControl>
+    </View>
+
+    <!-- ADx.FineGrainedPasswordPolicy: one PSO; RSAT renders it as a list. -->
+    <View>
+      <Name>ADx.FineGrainedPasswordPolicy</Name>
+      <ViewSelectedBy>
+        <TypeName>ADx.FineGrainedPasswordPolicy</TypeName>
+      </ViewSelectedBy>
+      <ListControl>
+        <ListEntries>
+          <ListEntry>
+            <ListItems>
+              <ListItem><PropertyName>Name</PropertyName></ListItem>
+              <ListItem><PropertyName>Precedence</PropertyName></ListItem>
+              <ListItem><PropertyName>MinPasswordLength</PropertyName></ListItem>
+              <ListItem><PropertyName>ComplexityEnabled</PropertyName></ListItem>
+              <ListItem><PropertyName>ReversibleEncryptionEnabled</PropertyName></ListItem>
+              <ListItem><PropertyName>PasswordHistoryCount</PropertyName></ListItem>
+              <ListItem><PropertyName>MinPasswordAge</PropertyName></ListItem>
+              <ListItem><PropertyName>MaxPasswordAge</PropertyName></ListItem>
+              <ListItem><PropertyName>LockoutThreshold</PropertyName></ListItem>
+              <ListItem><PropertyName>LockoutDuration</PropertyName></ListItem>
+              <ListItem><PropertyName>LockoutObservationWindow</PropertyName></ListItem>
+              <ListItem><PropertyName>AppliesTo</PropertyName></ListItem>
+              <ListItem><PropertyName>DistinguishedName</PropertyName></ListItem>
+            </ListItems>
+          </ListEntry>
+        </ListEntries>
+      </ListControl>
+    </View>
+
+    <!-- ADx.Account: Search-ADxAccount results (mixed users/computers), rendered as a list. -->
+    <View>
+      <Name>ADx.Account</Name>
+      <ViewSelectedBy>
+        <TypeName>ADx.Account</TypeName>
+      </ViewSelectedBy>
+      <ListControl>
+        <ListEntries>
+          <ListEntry>
+            <ListItems>
+              <ListItem><PropertyName>DistinguishedName</PropertyName></ListItem>
+              <ListItem><PropertyName>Name</PropertyName></ListItem>
+              <ListItem><PropertyName>SamAccountName</PropertyName></ListItem>
+              <ListItem><PropertyName>Enabled</PropertyName></ListItem>
+              <ListItem><PropertyName>LockedOut</PropertyName></ListItem>
+              <ListItem><PropertyName>PasswordExpired</PropertyName></ListItem>
+              <ListItem><PropertyName>PasswordNeverExpires</PropertyName></ListItem>
+              <ListItem><PropertyName>AccountExpirationDate</PropertyName></ListItem>
+              <ListItem><PropertyName>LastLogonDate</PropertyName></ListItem>
+              <ListItem><PropertyName>ObjectClass</PropertyName></ListItem>
+            </ListItems>
+          </ListEntry>
+        </ListEntries>
+      </ListControl>
+    </View>
+
     <!-- ADx.RootDse: list view. This is a single diagnostic object, so a list reads
          better than a table and leaves room for the full naming contexts. -->
     <View>

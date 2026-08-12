@@ -58,7 +58,7 @@ public static class AdSyntheticProperties
         {
             "PasswordExpired", "KerberosEncryptionType", "CompoundIdentitySupported",
             "PrimaryGroup", "IPv4Address", "IPv6Address", "ProtectedFromAccidentalDeletion",
-            "PrincipalsAllowedToDelegateToAccount",
+            "PrincipalsAllowedToDelegateToAccount", "PrincipalsAllowedToRetrieveManagedPassword",
         };
 
     /// <summary>Takes $true/$false: the UAC-bit properties plus LockedOut.</summary>
