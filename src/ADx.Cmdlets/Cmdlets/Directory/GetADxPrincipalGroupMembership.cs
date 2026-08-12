@@ -102,7 +102,26 @@ public sealed class GetADxPrincipalGroupMembership : ADxMembershipQueryCmdletBas
             return entry;
         }
 
-        var lookup = AdIdentityResolver.BuildLookupFilter(kind, value);
+        var entryBySearch = RunPrincipalSearch(AdIdentityResolver.BuildLookupFilter(kind, value));
+
+        // Computers: 'WS01' misses because the stored sAMAccountName is 'WS01$'. The
+        // SecurityPrincipal schema declares this retry (IdentitySamTriesDollarSuffix) -- a
+        // computer is a principal too -- and RSAT's Get-ADPrincipalGroupMembership accepts
+        // the suffixless name. Same retry ADxObjectCmdletBase.ResolveBySearch applies.
+        if (entryBySearch is null &&
+            kind == AdIdentityKind.SamAccountName &&
+            AdObjectSchema.SecurityPrincipal.IdentitySamTriesDollarSuffix &&
+            value is string sam && !sam.EndsWith('$'))
+        {
+            entryBySearch = RunPrincipalSearch(
+                AdIdentityResolver.BuildLookupFilter(kind, sam + "$"));
+        }
+
+        return entryBySearch;
+    }
+
+    private LdapEntry? RunPrincipalSearch(AdFilterNode lookup)
+    {
         var spec = new LdapSearchSpec(
             DefaultNamingContext(),
             AdFilterEmitter.Emit(lookup),

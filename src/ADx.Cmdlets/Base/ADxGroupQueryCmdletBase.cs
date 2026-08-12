@@ -94,13 +94,41 @@ public abstract class ADxGroupQueryCmdletBase : ADxMembershipQueryCmdletBase
             // reconciliation is warned about, not silently dropped.
             var rid = LdapConvert.SidRid(group.GetBytes("objectSid"));
             if (rid is null)
+            {
                 WriteWarning(
                     $"'{group.DistinguishedName}' has no readable objectSid; members whose PRIMARY group " +
                     "this is (primaryGroupID matches) cannot be included.");
+            }
+            else if (IsGlobalCatalog)
+            {
+                // A RID is meaningful only relative to a domain SID. On a GC bind the subtree
+                // search also reaches namespace-subordinate child partitions, so a
+                // primaryGroupID arm would match OTHER domains' accounts with the same RID --
+                // e.g. every child domain's users (RID 513) reported as members of the root's
+                // Domain Users. Silent over-reporting is the one failure class this module
+                // must never have; drop the arm and warn instead.
+                WriteWarning(
+                    $"Bound to a Global Catalog (port {EffectivePort}): primaryGroupID is a domain-relative " +
+                    "RID and cannot be matched safely across the forest-wide GC namespace, so members held " +
+                    "only through a primary-group link (the group's own or, with -Recursive, a nested " +
+                    $"group's) are NOT included for '{group.DistinguishedName}'. Bind the group's own " +
+                    "domain (port 389/636) to include them.");
+                rid = null;
+            }
 
+            // The member attribute rides along on resolution for foreign-partition detection;
+            // past MaxValRange that read holds only the first range block, and a cross-domain
+            // member at index 1500+ would evade the warning -- complete the walk first.
+            if (LdapRangeRetriever.NeedsCompletion(group))
+            {
+                group = LdapRangeRetriever
+                    .CompleteAsync(GetConnection(), group, CancellationToken, EnqueueWarning)
+                    .GetAwaiter().GetResult();
+                DrainMessages();
+            }
             WarnOnForeignPartitionMembers(group);
 
-            var nestedRids = NeedsNestedPrimaryGroupRids
+            var nestedRids = NeedsNestedPrimaryGroupRids && !IsGlobalCatalog
                 ? CollectNestedGroupRids(group.DistinguishedName)
                 : Array.Empty<uint>();
 
