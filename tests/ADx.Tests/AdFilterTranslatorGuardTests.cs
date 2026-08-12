@@ -143,6 +143,22 @@ public class AdFilterTranslatorGuardTests
         Fails(filter);
     }
 
+    // The c-prefixed forms of the UNSUPPORTED operators get the operation's tailored
+    // explanation (the actionable half of their double unsupportedness), in both tokenizer
+    // encodings -- not the generic "not a recognised operator" their i-form siblings avoid.
+    [Theory]
+    [InlineData("Name -cmatch 'x'", "regex")]
+    [InlineData("(Name -cmatch 'x')", "regex")]
+    [InlineData("Name -cnotmatch 'x'", "regex")]
+    [InlineData("Name -ccontains 'x'", "multi-valued")]
+    [InlineData("(Name -ccontains 'x')", "multi-valued")]
+    [InlineData("Name -cin 'x'", "repeated -eq")]
+    [InlineData("Name -creplace 'x'", "computed")]
+    public void CPrefixedUnsupportedOperators_GetTailoredMessages(string filter, string fragment)
+    {
+        FailsWith(filter, fragment);
+    }
+
     // ---- variables ----
 
     [Fact]
@@ -394,10 +410,10 @@ public class AdFilterTranslatorGuardTests
 
     [Theory]
     [InlineData("Name -recursivematch 'CN=x,DC=y'")]
-    [InlineData("manager -recursivematch 'CN=x,DC=y'")]
-    public void RecursiveMatch_OnlyOnMemberAndMemberOf(string filter)
+    [InlineData("mail -recursivematch 'CN=x,DC=y'")]
+    public void RecursiveMatch_OnlyOnDnValuedAttributes(string filter)
     {
-        FailsWith(filter, "only applies to 'member' and 'memberOf'");
+        FailsWith(filter, "DN-valued");
     }
 
     [Fact]

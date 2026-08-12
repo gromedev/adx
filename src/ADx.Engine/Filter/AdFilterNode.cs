@@ -16,6 +16,14 @@ public sealed record AdFilterEquality(string Attribute, LdapAssertionValue Value
 /// <summary>(!(Attribute=Value))</summary>
 public sealed record AdFilterInequality(string Attribute, LdapAssertionValue Value) : AdFilterNode;
 
+/// <summary>
+/// (Attribute~=Value) -- RFC 4511 approximate match, for RSAT's <c>-approx</c>. Active
+/// Directory implements no phonetic algorithm and evaluates <c>~=</c> as plain equality,
+/// but the operator is part of RSAT's accepted filter grammar, so a drop-in module must
+/// accept it and emit the same wire filter RSAT does.
+/// </summary>
+public sealed record AdFilterApprox(string Attribute, LdapAssertionValue Value) : AdFilterNode;
+
 /// <summary>(Attribute&gt;=Value)</summary>
 public sealed record AdFilterGreaterOrEqual(string Attribute, LdapAssertionValue Value) : AdFilterNode;
 

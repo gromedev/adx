@@ -42,6 +42,18 @@ internal static class AdFilterOperators
             ["contains"] = "-contains is not supported by AD filters. -eq already matches within a multi-valued attribute.",
             ["notcontains"] = "-notcontains is not supported by AD filters. -ne already matches within a multi-valued attribute.",
             ["replace"] = "-replace is not supported: filter values cannot be computed. Resolve the value first and pass it in a variable.",
+
+            // The c-prefixed forms of the operators above fail twice over (AD has neither the
+            // operation nor case-sensitive matching); they get the operation's explanation,
+            // which is the actionable half, rather than falling into the generic
+            // "not a recognised operator" message their i-form siblings avoid.
+            ["cmatch"] = "-cmatch is not supported: AD filters have no regex matching (and no case-sensitive matching). Use -like with '*' wildcards.",
+            ["cnotmatch"] = "-cnotmatch is not supported: AD filters have no regex matching (and no case-sensitive matching). Use -notlike with '*' wildcards.",
+            ["cin"] = "-cin is not supported by AD filters. Use -or with repeated -eq comparisons.",
+            ["cnotin"] = "-cnotin is not supported by AD filters. Use -and with repeated -ne comparisons.",
+            ["ccontains"] = "-ccontains is not supported by AD filters. -eq already matches within a multi-valued attribute.",
+            ["cnotcontains"] = "-cnotcontains is not supported by AD filters. -ne already matches within a multi-valued attribute.",
+            ["creplace"] = "-creplace is not supported: filter values cannot be computed. Resolve the value first and pass it in a variable.",
         };
 
     /// <summary>
@@ -111,6 +123,17 @@ internal static class AdFilterOperators
             TokenKind.Ireplace => "replace",
             TokenKind.In or TokenKind.Iin => "in",
             TokenKind.Inotin => "notin",
+            // The c-prefixed NON-comparison kinds map to their own ids (keys in
+            // UnsupportedReasons), so the parenthesized encoding gets the same tailored
+            // message as the command-mode ParameterToken encoding. The c-prefixed COMPARISON
+            // kinds stay unmapped -- IsCaseSensitive rejects those first.
+            TokenKind.Cmatch => "cmatch",
+            TokenKind.Cnotmatch => "cnotmatch",
+            TokenKind.Ccontains => "ccontains",
+            TokenKind.Cnotcontains => "cnotcontains",
+            TokenKind.Creplace => "creplace",
+            TokenKind.Cin => "cin",
+            TokenKind.Cnotin => "cnotin",
             _ => null
         }
     };

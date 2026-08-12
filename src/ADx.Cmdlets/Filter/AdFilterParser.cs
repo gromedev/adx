@@ -38,7 +38,10 @@ namespace ADx.Cmdlets.Filter;
 /// </summary>
 internal sealed class AdFilterParser
 {
-    private static readonly Regex PropertyNamePattern = new("^[A-Za-z][A-Za-z0-9-]*$", RegexOptions.Compiled);
+    // Underscore is included: it is legal in ldapDisplayName and common in HR-sync custom
+    // schemas, and blocking it made such attributes unfilterable even under
+    // -AllowUnknownProperty, contradicting that switch's purpose.
+    private static readonly Regex PropertyNamePattern = new("^[A-Za-z][A-Za-z0-9_-]*$", RegexOptions.Compiled);
 
     private readonly Token[] _tokens;
     private readonly Func<string, (bool Found, object? Value)> _resolveVariable;
@@ -163,7 +166,7 @@ internal sealed class AdFilterParser
         if (AdFilterOperators.TryGetUnsupportedReason(operatorId, out var reason))
             throw new AdFilterTranslationException(reason);
 
-        if (operatorId is not ("eq" or "ne" or "like" or "notlike" or "ge" or "gt" or "le" or "lt" or "band" or "bor" or "recursivematch"))
+        if (operatorId is not ("eq" or "ne" or "like" or "notlike" or "ge" or "gt" or "le" or "lt" or "band" or "bor" or "recursivematch" or "approx"))
             throw new AdFilterTranslationException($"'-{operatorId}' is not a recognised '-Filter' operator.");
 
         if (Current.Kind == TokenKind.EndOfInput)
@@ -440,6 +443,13 @@ internal sealed class AdFilterParser
 
         var syntax = AdAttributeSchema.SyntaxOf(ldapName);
 
+        // GeneralizedTime comparisons get their own builder: AD stores these attributes at
+        // whole-second precision, so a sub-second bound must be rounded direction-aware (with
+        // the operator adjusted to keep the comparison exact) rather than silently truncated.
+        if (syntax == AdAttributeSyntax.GeneralizedTime &&
+            operatorId is "eq" or "ne" or "ge" or "gt" or "le" or "lt")
+            return BuildGeneralizedTimeComparison(ldapName, operatorId, rawValue, propertyText);
+
         return operatorId switch
         {
             "eq" => new AdFilterEquality(ldapName, MarshalExact(syntax, rawValue, propertyText)),
@@ -453,7 +463,52 @@ internal sealed class AdFilterParser
             "band" => new AdFilterBitAnd(ldapName, MarshalBitmask(syntax, rawValue, propertyText, isKnownAttribute)),
             "bor" => new AdFilterBitOr(ldapName, MarshalBitmask(syntax, rawValue, propertyText, isKnownAttribute)),
             "recursivematch" => BuildRecursiveMatch(ldapName, rawValue, propertyText),
+            "approx" => new AdFilterApprox(ldapName, MarshalExact(syntax, rawValue, propertyText)),
             _ => throw new AdFilterTranslationException($"'-{operatorId}' is not supported in '-Filter'.")
+        };
+    }
+
+    /// <summary>
+    /// GeneralizedTime bounds, kept exact against whole-second storage. For a bound with
+    /// sub-second ticks the value is rounded in the operator's direction AND the strictness
+    /// dropped, which is an equivalence, not an approximation: for whole-second T,
+    /// <c>T &gt;= d</c> and <c>T &gt; d</c> both hold exactly when <c>T &gt;= ceil(d)</c>, and
+    /// <c>T &lt;= d</c> / <c>T &lt; d</c> exactly when <c>T &lt;= floor(d)</c>. Equality
+    /// against a sub-second bound can never match (and its negation always matches), so both
+    /// are refused rather than silently truncated -- the truncated filter would include
+    /// entries stamped at exactly the truncated second, which the caller's bound excludes.
+    /// </summary>
+    private static AdFilterNode BuildGeneralizedTimeComparison(
+        string ldapName, string operatorId, object rawValue, string propertyText)
+    {
+        var utc = LdapConvert.ToUtc(ToDateTime(rawValue, propertyText));
+        var fractionalTicks = utc.Ticks % TimeSpan.TicksPerSecond;
+
+        if (fractionalTicks == 0)
+        {
+            var value = LdapAssertionValue.Verbatim(LdapConvert.ToGeneralizedTime(utc));
+            return operatorId switch
+            {
+                "eq" => new AdFilterEquality(ldapName, value),
+                "ne" => new AdFilterInequality(ldapName, value),
+                "ge" => new AdFilterGreaterOrEqual(ldapName, value),
+                "gt" => new AdFilterGreaterThan(ldapName, value),
+                "le" => new AdFilterLessOrEqual(ldapName, value),
+                _ => new AdFilterLessThan(ldapName, value)
+            };
+        }
+
+        var floor = new DateTime(utc.Ticks - fractionalTicks, DateTimeKind.Utc);
+        return operatorId switch
+        {
+            "ge" or "gt" => new AdFilterGreaterOrEqual(
+                ldapName, LdapAssertionValue.Verbatim(LdapConvert.ToGeneralizedTime(floor.AddSeconds(1)))),
+            "le" or "lt" => new AdFilterLessOrEqual(
+                ldapName, LdapAssertionValue.Verbatim(LdapConvert.ToGeneralizedTime(floor))),
+            _ => throw new AdFilterTranslationException(
+                $"'{propertyText}' stores whole seconds; -{operatorId} against a sub-second timestamp " +
+                "can never compare equal, so the filter would successfully match the wrong set. " +
+                "Truncate the value to a whole second first.")
         };
     }
 
@@ -489,15 +544,23 @@ internal sealed class AdFilterParser
                 $"'{propertyText}' requires a string value in '-Filter', not '{rawValue}'.");
 
         AdSyntheticProperties.TryEmitStringEquality(propertyText, enumName, out var equality);
-        return operatorId == "eq" ? equality : new AdFilterNot(equality);
+        // Unwrap rather than stack: "GroupCategory -eq 'Distribution'" already emits a
+        // negated node, and wrapping that again would render (!(!(...))).
+        return operatorId == "eq"
+            ? equality
+            : equality is AdFilterNot negated ? negated.Operand : new AdFilterNot(equality);
     }
 
     private static AdFilterNode BuildRecursiveMatch(string ldapName, object rawValue, string propertyText)
     {
-        if (!ldapName.Equals("member", StringComparison.OrdinalIgnoreCase) &&
-            !ldapName.Equals("memberOf", StringComparison.OrdinalIgnoreCase))
+        // The 1941 chain rule walks any DN-linked attribute (manager chains are a real, if
+        // exotic, use RSAT accepts), so the gate is the schema's Dn syntax, not a hard-coded
+        // member/memberOf pair. Non-DN attributes stay a loud error: AD would answer the
+        // structurally valid filter with zero rows and a success code.
+        if (AdAttributeSchema.SyntaxOf(ldapName) != AdAttributeSyntax.Dn)
             throw new AdFilterTranslationException(
-                "'-RecursiveMatch' (transitive group membership) only applies to 'member' and 'memberOf'.");
+                $"'-RecursiveMatch' (transitive chain matching) only applies to DN-valued attributes such as " +
+                $"'member', 'memberOf' or 'manager'; '{propertyText}' is not DN-valued.");
 
         if (rawValue is not string dn || dn.Length == 0)
             throw new AdFilterTranslationException("'-RecursiveMatch' needs a distinguished name string.");
@@ -524,8 +587,28 @@ internal sealed class AdFilterParser
                 ? LdapAssertionValue.Binary(bytes)
                 : throw new AdFilterTranslationException(
                     $"'{propertyText}' is a binary attribute; '-Filter' needs a byte[] value for it."),
-            _ => LdapAssertionValue.Exact(ToNonEmptyText(rawValue, propertyText))
+            _ => LdapAssertionValue.Exact(RejectWildcardInExactValue(ToNonEmptyText(rawValue, propertyText), propertyText))
         };
+
+    /// <summary>
+    /// A '*' inside an exact-match value is where RSAT and PowerShell semantics part ways:
+    /// RSAT passes it to LDAP as a wildcard (its <c>mail -ne '*'</c> idiom means "mail
+    /// absent"), while PowerShell's <c>-eq</c> means an exact match against a literal
+    /// asterisk. Escaping it (what this module did) silently inverted the result set of the
+    /// RSAT idiom -- <c>(!(mail=\2a))</c> matches nearly the whole directory. Neither reading
+    /// is safe to pick silently, so this is a terminating error with both spellings offered.
+    /// </summary>
+    private static string RejectWildcardInExactValue(string text, string propertyText)
+    {
+        if (text.Contains('*'))
+            throw new AdFilterTranslationException(
+                $"'{propertyText}' compared with -eq/-ne against a value containing '*': RSAT would treat the '*' " +
+                "as a wildcard, PowerShell's -eq means a literal asterisk, and silently picking either can invert " +
+                "the result set (RSAT's \"mail -ne '*'\" means \"mail absent\"). Use -like/-notlike for wildcard " +
+                "or presence semantics (\"mail -notlike '*'\" is \"mail absent\"), '-eq $null'/'-ne $null' for " +
+                "presence tests, or -LDAPFilter with the escaped value '\\2a' for a literal asterisk.");
+        return text;
+    }
 
     /// <summary>
     /// FileTime attributes accept both shapes that appear in real queries: a DateTime (or a
@@ -538,7 +621,21 @@ internal sealed class AdFilterParser
             return LdapAssertionValue.Verbatim(ToIntegerText(rawValue, propertyText));
         if (rawValue is string s && long.TryParse(s, NumberStyles.Integer, CultureInfo.InvariantCulture, out var raw))
             return LdapAssertionValue.Verbatim(raw.ToString(CultureInfo.InvariantCulture));
-        return LdapAssertionValue.Verbatim(LdapConvert.ToFileTime(ToDateTime(rawValue, propertyText)));
+
+        try
+        {
+            return LdapAssertionValue.Verbatim(LdapConvert.ToFileTime(ToDateTime(rawValue, propertyText)));
+        }
+        catch (ArgumentOutOfRangeException ex)
+        {
+            // [datetime]::MinValue and friends: without this wrap the raw
+            // ArgumentOutOfRangeException escapes the cmdlet's translation-error handling and
+            // surfaces as an unclassified crash instead of the promised clean error.
+            throw new AdFilterTranslationException(
+                $"'{propertyText}' cannot be compared against a timestamp before 1601-01-01 UTC (the FILETIME " +
+                "epoch): Active Directory cannot store one. To match \"never set\", compare against the raw " +
+                $"sentinel instead: '{propertyText} -eq 0'.", ex);
+        }
     }
 
     private static LdapAssertionValue MarshalPattern(AdAttributeSyntax syntax, object rawValue, string propertyText)

@@ -135,12 +135,7 @@ public class AdFilterTranslatorTests
     // ---- the -eq vs -like escaping divergence ----
 
     [Theory]
-    // THE golden pair: same raw value, different operator, different escaping
-    [InlineData("Name -eq 'j*'", "(name=j\\2a)")]
     [InlineData("Name -like 'j*'", "(name=j*)")]
-    // The i-prefixed spellings escape the same way as their bare equivalents -- the
-    // normalization must not accidentally route -ieq through the pattern escaper.
-    [InlineData("Name -ieq 'j*'", "(name=j\\2a)")]
     [InlineData("Name -ilike 'j*'", "(name=j*)")]
     // RFC 4515 specials in exact values
     [InlineData("Name -eq 'a(b)c'", "(name=a\\28b\\29c)")]
@@ -156,11 +151,36 @@ public class AdFilterTranslatorTests
         Assert.Equal(expected, T(filter));
     }
 
+    // ---- '*' in an exact-match value: the RSAT-vs-PowerShell semantic fork, refused loudly ----
+
+    [Theory]
+    // THE case that inverts a drop-in script's result set: RSAT's "mail absent" idiom.
+    [InlineData("mail -ne '*'")]
+    [InlineData("Name -eq 'j*'")]
+    // The i-prefixed spelling must route through the same rejection.
+    [InlineData("Name -ieq 'j*'")]
+    // Both tokenizer encodings.
+    [InlineData("(Name -eq 'j*')")]
+    public void WildcardInExactValue_IsATerminatingError(string filter)
+    {
+        var ex = Assert.Throws<AdFilterTranslationException>(() => T(filter));
+        Assert.Contains("wildcard", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("-like", ex.Message);
+    }
+
+    [Fact]
+    public void WildcardInExactValue_FromAVariable_IsATerminatingError()
+    {
+        var resolver = Vars(("v", "*)(uid=*"));
+        var ex = Assert.Throws<AdFilterTranslationException>(() => T("Description -eq $v", resolver));
+        Assert.Contains("-like", ex.Message);
+    }
+
     [Fact]
     public void InjectionCharactersInVariableValue_AreEscaped()
     {
-        var resolver = Vars(("v", "*)(uid=*"));
-        Assert.Equal("(description=\\2a\\29\\28uid=\\2a)", T("Description -eq $v", resolver));
+        var resolver = Vars(("v", ")(uid=x"));
+        Assert.Equal("(description=\\29\\28uid=x)", T("Description -eq $v", resolver));
     }
 
     // ---- $null: presence and absence ----
@@ -257,6 +277,110 @@ public class AdFilterTranslatorTests
         var local = new DateTime(2024, 1, 2, 3, 4, 5, DateTimeKind.Local);
         var expected = $"(whenCreated>={local.ToUniversalTime():yyyyMMddHHmmss}.0Z)";
         Assert.Equal(expected, T("whenCreated -ge '2024-01-02 03:04:05'"));
+    }
+
+    // ---- DateTime Kind and precision: the silent-skew traps ----
+
+    [Fact]
+    public void UnspecifiedKindDateTimeVariable_MarshalsExactlyLikeTheIdenticalDateString()
+    {
+        // PowerShell's [datetime]'...' cast yields Kind=Unspecified. It must follow the same
+        // AssumeLocal rule as a date string -- treating it as UTC made the variable and string
+        // spellings of one timestamp differ by the host's offset, silently.
+        var unspecified = new DateTime(2024, 1, 2, 3, 4, 5, DateTimeKind.Unspecified);
+        Assert.Equal(
+            T("whenCreated -ge '2024-01-02 03:04:05'"),
+            T("whenCreated -ge $d", Vars(("d", unspecified))));
+    }
+
+    [Fact]
+    public void UnspecifiedKindDateTime_FileTimeAttribute_MatchesTheLocalKindRendering()
+    {
+        var local = new DateTime(2024, 1, 2, 3, 4, 5, DateTimeKind.Local);
+        var unspecified = DateTime.SpecifyKind(local, DateTimeKind.Unspecified);
+        Assert.Equal(
+            T("PasswordLastSet -ge $d", Vars(("d", local))),
+            T("PasswordLastSet -ge $d", Vars(("d", unspecified))));
+    }
+
+    [Theory]
+    // Lower bounds round UP with the strictness dropped -- for whole-second stored values,
+    // T >= d and T > d both hold exactly when T >= ceil(d). Emitting the truncated value
+    // would wrongly include entries stamped at exactly the truncated second.
+    [InlineData("ge", "(whenCreated>=20240102030406.0Z)")]
+    [InlineData("gt", "(whenCreated>=20240102030406.0Z)")]
+    // Upper bounds round DOWN: T <= d and T < d both hold exactly when T <= floor(d).
+    [InlineData("le", "(whenCreated<=20240102030405.0Z)")]
+    [InlineData("lt", "(whenCreated<=20240102030405.0Z)")]
+    public void SubSecondGeneralizedTimeBound_RoundsDirectionAwareToAnExactBound(string op, string expected)
+    {
+        var d = new DateTime(2024, 1, 2, 3, 4, 5, DateTimeKind.Utc).AddMilliseconds(789);
+        Assert.Equal(expected, T($"whenCreated -{op} $d", Vars(("d", d))));
+    }
+
+    [Theory]
+    [InlineData("eq")]
+    [InlineData("ne")]
+    public void SubSecondGeneralizedTimeEquality_IsATerminatingError(string op)
+    {
+        var d = new DateTime(2024, 1, 2, 3, 4, 5, DateTimeKind.Utc).AddMilliseconds(789);
+        var ex = Assert.Throws<AdFilterTranslationException>(
+            () => T($"whenCreated -{op} $d", Vars(("d", d))));
+        Assert.Contains("whole second", ex.Message);
+    }
+
+    [Fact]
+    public void SubSecondFileTimeBound_KeepsFullTickPrecision()
+    {
+        // FILETIME has 100ns resolution: sub-second bounds are faithful as-is, no rounding.
+        var d = new DateTime(2024, 1, 2, 3, 4, 5, DateTimeKind.Utc).AddTicks(1_234_567);
+        Assert.Equal($"(pwdLastSet>={d.ToFileTimeUtc()})", T("PasswordLastSet -ge $d", Vars(("d", d))));
+    }
+
+    [Fact]
+    public void Pre1601FileTimeBound_IsACleanTranslationError()
+    {
+        var ex = Assert.Throws<AdFilterTranslationException>(
+            () => T("PasswordLastSet -lt $d", Vars(("d", DateTime.MinValue))));
+        Assert.Contains("1601", ex.Message);
+    }
+
+    // ---- -approx: RSAT grammar, LDAP '~=' ----
+
+    [Theory]
+    [InlineData("Name -approx 'jdoe'", "(name~=jdoe)")]
+    [InlineData("(Name -approx 'jdoe')", "(name~=jdoe)")]
+    public void ApproxOperator_EmitsApproximateMatch(string filter, string expected)
+    {
+        Assert.Equal(expected, T(filter));
+    }
+
+    // ---- underscore attribute names (legal in ldapDisplayName, common in HR-sync schemas) ----
+
+    [Fact]
+    public void UnderscoreAttributeName_IsFilterableUnderAllowUnknownProperty()
+    {
+        var node = AdFilterTranslator.Translate("hr_employee_type -eq 'FTE'", NoVariables, allowUnknownProperty: true)!;
+        Assert.Equal("(hr_employee_type=FTE)", AdFilterEmitter.Emit(node));
+    }
+
+    // ---- GroupCategory -ne: single negation, not a stacked double-not ----
+
+    [Fact]
+    public void GroupCategoryNotEquals_UnwrapsTheAlreadyNegatedNode()
+    {
+        Assert.Equal("(groupType:1.2.840.113556.1.4.803:=2147483648)", T("GroupCategory -ne 'Distribution'"));
+        Assert.Equal("(!(groupType:1.2.840.113556.1.4.803:=2147483648))", T("GroupCategory -ne 'Security'"));
+    }
+
+    // ---- -RecursiveMatch on DN-valued attributes beyond member/memberOf ----
+
+    [Fact]
+    public void RecursiveMatch_OnManagerChain_Emits1941()
+    {
+        Assert.Equal(
+            "(manager:1.2.840.113556.1.4.1941:=CN=Boss,OU=x,DC=y)",
+            T("manager -recursivematch 'CN=Boss,OU=x,DC=y'"));
     }
 
     // ---- SID and GUID binary escaping ----
@@ -402,10 +526,13 @@ public class AdFilterTranslatorTests
     [Fact]
     public void VariableValue_EscapingStillFollowsTheOperator()
     {
-        // The escaping decision tracks the operator even when the value came from a variable.
-        var resolver = Vars(("pattern", "j*"));
-        Assert.Equal("(name=j\\2a)", T("Name -eq $pattern", resolver));
-        Assert.Equal("(name=j*)", T("Name -like $pattern", resolver));
+        // The escaping decision tracks the operator even when the value came from a variable:
+        // parens escape under -eq, survive as literals-to-escape under -like too, while the
+        // -like wildcard passes through and the same value under -eq is refused.
+        Assert.Equal("(name=j\\281\\29)", T("Name -eq $v", Vars(("v", "j(1)"))));
+        var wildcard = Vars(("pattern", "j*"));
+        Assert.Equal("(name=j*)", T("Name -like $pattern", wildcard));
+        Assert.Throws<AdFilterTranslationException>(() => T("Name -eq $pattern", wildcard));
     }
 
     [Fact]

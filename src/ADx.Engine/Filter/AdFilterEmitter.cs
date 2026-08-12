@@ -35,6 +35,10 @@ public static class AdFilterEmitter
                 sb.Append(')');
                 break;
 
+            case AdFilterApprox n:
+                EmitAssertion(sb, n.Attribute, "~=", n.Value);
+                break;
+
             case AdFilterGreaterOrEqual n:
                 EmitAssertion(sb, n.Attribute, ">=", n.Value);
                 break;

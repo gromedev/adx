@@ -339,42 +339,48 @@ public static class LdapConvert
     }
 
     /// <summary>
-    /// Render a UTC <see cref="DateTime"/> as an LDAP GeneralizedTime filter value
-    /// (<c>yyyyMMddHHmmss.0Z</c>), the inverse of <see cref="GeneralizedTime(string?)"/>.
-    /// <para>
-    /// <paramref name="value"/> is converted to UTC first regardless of its
-    /// <see cref="DateTime.Kind"/> -- AD always compares GeneralizedTime attributes
-    /// (<c>whenCreated</c>, <c>whenChanged</c>) in UTC, so emitting local wall-clock digits
-    /// with a 'Z' suffix would silently skew the comparison by the host's offset.
-    /// </para>
+    /// Normalize a <see cref="DateTime"/> of any Kind to UTC for filter rendering.
+    /// <see cref="DateTimeKind.Unspecified"/> is treated as LOCAL wall-clock time -- the same
+    /// convention as .NET's own <c>ToUniversalTime</c>/<c>ToFileTime</c> and as RSAT, and the
+    /// same rule the filter parser applies to date STRINGS (<c>DateTimeStyles.AssumeLocal</c>).
+    /// PowerShell's <c>[datetime]'...'</c> cast produces Kind=Unspecified, so assuming UTC here
+    /// made a date passed via a variable differ from the identical date passed as a string by
+    /// the host's UTC offset -- a silent skew in every timestamp filter.
     /// </summary>
-    public static string ToGeneralizedTime(DateTime value)
+    public static DateTime ToUtc(DateTime value) => value.Kind switch
     {
-        var utc = value.Kind switch
-        {
-            DateTimeKind.Utc => value,
-            DateTimeKind.Local => value.ToUniversalTime(),
-            _ => DateTime.SpecifyKind(value, DateTimeKind.Utc)
-        };
-        return utc.ToString("yyyyMMddHHmmss.0Z", CultureInfo.InvariantCulture);
-    }
+        DateTimeKind.Utc => value,
+        DateTimeKind.Local => value.ToUniversalTime(),
+        _ => DateTime.SpecifyKind(value, DateTimeKind.Local).ToUniversalTime()
+    };
 
     /// <summary>
-    /// Render a UTC <see cref="DateTime"/> as a Windows FILETIME filter value (100ns intervals
+    /// Render a <see cref="DateTime"/> as an LDAP GeneralizedTime filter value
+    /// (<c>yyyyMMddHHmmss.0Z</c>), the inverse of <see cref="GeneralizedTime(string?)"/>.
+    /// <para>
+    /// <paramref name="value"/> is normalized via <see cref="ToUtc"/> first -- AD always
+    /// compares GeneralizedTime attributes (<c>whenCreated</c>, <c>whenChanged</c>) in UTC,
+    /// so emitting local wall-clock digits with a 'Z' suffix would silently skew the
+    /// comparison by the host's offset. Sub-second ticks are not representable
+    /// (AD's GeneralizedTime carries whole seconds; the only accepted fraction is
+    /// <c>.0</c>) -- the filter parser rounds direction-aware before calling this, so
+    /// plain truncation here is never observable.
+    /// </para>
+    /// </summary>
+    public static string ToGeneralizedTime(DateTime value) =>
+        ToUtc(value).ToString("yyyyMMddHHmmss.0Z", CultureInfo.InvariantCulture);
+
+    /// <summary>
+    /// Render a <see cref="DateTime"/> as a Windows FILETIME filter value (100ns intervals
     /// since 1601-01-01 UTC), the inverse of <see cref="FileTime(long)"/>. Used for
     /// FileTime-syntax attributes in a filter -- <c>pwdLastSet</c>, <c>accountExpires</c>,
     /// <c>lastLogonTimestamp</c> -- which AD compares as raw 64-bit integers, not text.
+    /// Kind normalization follows <see cref="ToUtc"/>. Throws
+    /// <see cref="ArgumentOutOfRangeException"/> for timestamps before the 1601-01-01 UTC
+    /// FILETIME epoch; the filter parser wraps that into its translation error.
     /// </summary>
-    public static string ToFileTime(DateTime value)
-    {
-        var utc = value.Kind switch
-        {
-            DateTimeKind.Utc => value,
-            DateTimeKind.Local => value.ToUniversalTime(),
-            _ => DateTime.SpecifyKind(value, DateTimeKind.Utc)
-        };
-        return utc.ToFileTimeUtc().ToString(CultureInfo.InvariantCulture);
-    }
+    public static string ToFileTime(DateTime value) =>
+        ToUtc(value).ToFileTimeUtc().ToString(CultureInfo.InvariantCulture);
 
     /// <summary>
     /// Parse an SDDL string ("S-1-5-21-...-512") back into a binary objectSid, the inverse of
