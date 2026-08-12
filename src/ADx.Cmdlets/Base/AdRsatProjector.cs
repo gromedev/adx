@@ -44,8 +44,11 @@ internal static class AdRsatProjector
     /// </summary>
     private static readonly HashSet<string> AlwaysMultiValued = new(StringComparer.OrdinalIgnoreCase)
     {
+        // description is deliberately NOT here: the attribute is multi-valued in the AD
+        // schema, but RSAT flattens it to a scalar string and scripts Substring/Export-Csv
+        // it -- an array here rendered as "System.String[]" where RSAT shows the text.
         "memberOf", "member", "servicePrincipalName", "proxyAddresses", "sIDHistory",
-        "userCertificate", "description",
+        "userCertificate",
         // A PSO's AppliesTo and a service account's HostComputers are multi-valued DN lists that
         // scripts index and Count, so a single value must not collapse to a scalar.
         "msDS-PSOAppliesTo", "msDS-HostServiceAccountBL",
@@ -66,7 +69,14 @@ internal static class AdRsatProjector
     /// <summary>What an output synthetic needs fetched.</summary>
     private static readonly Dictionary<string, string> SyntheticFetchAttribute = new(StringComparer.OrdinalIgnoreCase)
     {
-        ["LockedOut"] = "lockoutTime",
+        // The DC computes UF_LOCKOUT against the lockout observation window, so a lockout
+        // whose duration has elapsed reads False here. The stored lockoutTime does NOT reset
+        // on expiry -- deriving LockedOut from it (the previous behaviour) reported stale
+        // lockouts as active, where RSAT (whose LockedOut also comes from the computed
+        // attribute) says False. The FILTER synthetic still uses lockoutTime >= 1 (the
+        // computed attribute cannot appear in a search filter) -- a documented divergence
+        // between filtering and projection, same as PasswordExpired.
+        ["LockedOut"] = "msDS-User-Account-Control-Computed",
         ["AccountLockoutTime"] = "lockoutTime",
         // Constructed attribute: the UAC PasswordExpired bit (0x800000) is only meaningful in
         // msDS-User-Account-Control-Computed, not in the stored userAccountControl.
@@ -371,8 +381,12 @@ internal static class AdRsatProjector
 
         if (name.Equals("LockedOut", StringComparison.OrdinalIgnoreCase))
         {
-            var lockout = entry.GetInt64("lockoutTime");
-            return lockout is > 0;
+            // ADS_UF_LOCKOUT (0x10) of the constructed attribute -- the DC evaluates it
+            // against the lockout window, unlike the stored lockoutTime, which persists
+            // after the lockout expires. See SyntheticFetchAttribute for the rationale.
+            var computedUac = entry.GetInt64("msDS-User-Account-Control-Computed");
+            if (computedUac is null) return null;
+            return ((uint)computedUac.Value & 0x10) != 0;
         }
 
         if (name.Equals("AccountLockoutTime", StringComparison.OrdinalIgnoreCase))
@@ -468,6 +482,18 @@ internal static class AdRsatProjector
                 return LdapConvert.Interval(entry.GetString(lookupName));
 
             case AdAttributeSyntax.Integer:
+            {
+                // 32-bit in AD's schema and Int32 in RSAT's output. The range check is
+                // defensive only (a non-AD server could hand back anything): out-of-range
+                // survives as long rather than throwing mid-stream. Separate returns, not a
+                // ternary -- a ternary would silently widen the int branch back to long.
+                var value = entry.GetInt64(lookupName);
+                if (value is null) return null;
+                if (value.Value is >= int.MinValue and <= int.MaxValue) return (int)value.Value;
+                return value.Value;
+            }
+
+            case AdAttributeSyntax.LargeInteger:
                 return entry.GetInt64(lookupName);
 
             case AdAttributeSyntax.Boolean:

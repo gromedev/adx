@@ -216,13 +216,37 @@ public static class LdapConvert
                       | (sid[offset + 3] << 24));
     }
 
-    /// <summary>The domain portion of a SID: the full SDDL minus the trailing RID.</summary>
-    public static string? SidDomain(byte[]? sid)
+    /// <summary>
+    /// The domain portion of an ACCOUNT SID: <c>S-1-5-21-a-b-c</c> from
+    /// <c>S-1-5-21-a-b-c(-rid)</c>. Null for anything else -- matching
+    /// <c>SecurityIdentifier.AccountDomainSid</c>, which is non-null only for account SIDs.
+    /// The previous blind last-dash strip fabricated meaningless prefixes for well-known
+    /// SIDs ("S-1-5-32" from BUILTIN\Administrators), breaking "is this principal in my
+    /// domain" comparisons on objects every directory has.
+    /// </summary>
+    public static string? SidDomain(byte[]? sid) => SidAccountDomain(SidToSddl(sid));
+
+    /// <summary>SDDL-form counterpart of <see cref="SidDomain"/>; see there for semantics.</summary>
+    public static string? SidAccountDomain(string? sddl)
     {
-        var sddl = SidToSddl(sid);
-        if (sddl is null) return null;
-        var lastDash = sddl.LastIndexOf('-');
-        return lastDash <= 0 ? sddl : sddl.Substring(0, lastDash);
+        const string accountPrefix = "S-1-5-21-";
+        if (sddl is null || !sddl.StartsWith(accountPrefix, StringComparison.OrdinalIgnoreCase))
+            return null;
+
+        // Walk the three machine/domain subauthorities after the 21.
+        var index = accountPrefix.Length;
+        for (var n = 0; n < 3; n++)
+        {
+            var next = sddl.IndexOf('-', index);
+            if (next < 0)
+            {
+                // No further dash: exactly three subauthorities means the SID IS the
+                // domain SID (its own account domain); fewer means malformed.
+                return n == 2 && index < sddl.Length ? sddl : null;
+            }
+            index = next + 1;
+        }
+        return sddl.Substring(0, index - 1);
     }
 
     /// <summary>Decode a binary objectGUID. AD stores it in .NET Guid byte order.</summary>

@@ -347,6 +347,9 @@ public abstract class ADxCmdletBase : ADxCmdletCore
             case AdAttributeSyntax.Interval:
                 return LdapConvert.Interval(entry.GetString(name));
             case AdAttributeSyntax.Integer:
+            case AdAttributeSyntax.LargeInteger:
+                // Search-ADxObject keeps raw-LDAP conventions: Int64 for both integer widths
+                // (no RSAT type-parity promise on this cmdlet).
                 return entry.GetInt64(name);
             case AdAttributeSyntax.Binary:
             {

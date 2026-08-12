@@ -70,8 +70,10 @@ public class AdRsatProjectorTests
     public void SyntheticExtras_FetchTheirSourceAttributes()
     {
         var list = AdRsatProjector.BuildFetchList(
-            AdObjectSchema.User, new[] { "LockedOut", "PasswordExpired" }, false, out _);
+            AdObjectSchema.User, new[] { "LockedOut", "AccountLockoutTime", "PasswordExpired" }, false, out _);
 
+        // LockedOut reads the computed UAC (not lockoutTime -- see the projector);
+        // AccountLockoutTime is what still needs lockoutTime.
         Assert.Contains("lockoutTime", list);
         Assert.Contains("msDS-User-Account-Control-Computed", list);
     }
@@ -232,16 +234,50 @@ public class AdRsatProjectorTests
     // ---- synthetics beyond the defaults ----
 
     [Fact]
-    public void LockedOut_IsAThresholdOnLockoutTime()
+    public void LockedOut_ReadsTheComputedUacBit_NotLockoutTime()
     {
-        var locked = Entry("CN=X,DC=x", ("lockoutTime", new object[] { "133497000000000000" }));
+        // The DC evaluates ADS_UF_LOCKOUT (0x10) against the lockout window; the stored
+        // lockoutTime persists after expiry. lockoutTime rides along here to prove it is
+        // IGNORED: a stale lockout (lockoutTime set, bit clear) must read False, matching
+        // RSAT -- the old lockoutTime > 0 rule reported it as locked.
+        var locked = Entry("CN=X,DC=x",
+            ("lockoutTime", new object[] { "133497000000000000" }),
+            ("msDS-User-Account-Control-Computed", new object[] { "16" }));
         Assert.Equal(true, Value(ProjectUser(locked, new[] { "LockedOut" }), "LockedOut"));
 
-        var clear = Entry("CN=X,DC=x", ("lockoutTime", new object[] { "0" }));
-        Assert.Equal(false, Value(ProjectUser(clear, new[] { "LockedOut" }), "LockedOut"));
+        var stale = Entry("CN=X,DC=x",
+            ("lockoutTime", new object[] { "133497000000000000" }),
+            ("msDS-User-Account-Control-Computed", new object[] { "0" }));
+        Assert.Equal(false, Value(ProjectUser(stale, new[] { "LockedOut" }), "LockedOut"));
 
+        // No computed attribute at all -> null ("not fetched"), same convention as
+        // PasswordExpired, not a guessed False.
         var never = Entry("CN=X,DC=x");
-        Assert.Equal(false, Value(ProjectUser(never, new[] { "LockedOut" }), "LockedOut"));
+        Assert.Null(Value(ProjectUser(never, new[] { "LockedOut" }), "LockedOut"));
+    }
+
+    [Fact]
+    public void Description_IsAScalarString_MatchingRsatFlattening()
+    {
+        // Multi-valued in the AD schema, but RSAT flattens it and scripts Substring/Export-Csv
+        // it; an array here rendered as "System.String[]" where RSAT shows the text.
+        var entry = Entry("CN=X,DC=x", ("description", new object[] { "Service account for backups" }));
+        Assert.Equal(
+            "Service account for backups",
+            Value(ProjectUser(entry, new[] { "Description" }), "Description"));
+    }
+
+    [Fact]
+    public void IntegerWidths_FollowTheAdSyntax_Int32ForInteger_Int64ForLargeInteger()
+    {
+        var entry = Entry("CN=X,DC=x",
+            ("logonCount", new object[] { "42" }),
+            // A USN comfortably past Int32.MaxValue -- the reason uSN* are LargeInteger.
+            ("uSNChanged", new object[] { "5000000000" }));
+        var pso = ProjectUser(entry, new[] { "logonCount", "uSNChanged" });
+
+        Assert.Equal(42, Value(pso, "logonCount"));
+        Assert.Equal(5_000_000_000L, Value(pso, "uSNChanged"));
     }
 
     [Fact]
@@ -538,8 +574,9 @@ public class AdRsatProjectorTests
 
         Assert.Equal("ADx.FineGrainedPasswordPolicy", result.TypeNames[0]);
         Assert.Equal("StrongPolicy", Value(result, "Name"));
-        Assert.Equal(10L, Value(result, "Precedence"));
-        Assert.Equal(14L, Value(result, "MinPasswordLength"));
+        // Int32, not Int64: AD's Integer syntax is 32-bit and RSAT emits int.
+        Assert.Equal(10, Value(result, "Precedence"));
+        Assert.Equal(14, Value(result, "MinPasswordLength"));
         // Interval -> positive TimeSpan, exactly like the domain-head policy cmdlet.
         Assert.Equal(TimeSpan.FromDays(30), Value(result, "MaxPasswordAge"));
         Assert.Equal(true, Value(result, "ComplexityEnabled"));

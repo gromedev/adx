@@ -10,7 +10,21 @@ namespace ADx.Engine.Ldap;
 public enum AdAttributeSyntax
 {
     String,
+
+    /// <summary>
+    /// AD's 32-bit Integer/Enumeration syntaxes (2.5.5.9). Projected as <see cref="int"/> --
+    /// RSAT emits Int32 for these, and emitting long broke <c>-is [int]</c> checks and strict
+    /// serialization.
+    /// </summary>
     Integer,
+
+    /// <summary>
+    /// AD's 64-bit LargeInteger syntax (2.5.5.16) for values that are neither timestamps
+    /// (<see cref="FileTime"/>) nor durations (<see cref="Interval"/>): uSNCreated/uSNChanged
+    /// and friends. Projected as <see cref="long"/>.
+    /// </summary>
+    LargeInteger,
+
     Boolean,
     GeneralizedTime,
     FileTime,
@@ -90,8 +104,10 @@ public static class AdAttributeSchema
             ["badPwdCount"] = AdAttributeSyntax.Integer,
             ["sAMAccountType"] = AdAttributeSyntax.Integer,
             ["instanceType"] = AdAttributeSyntax.Integer,
-            ["uSNCreated"] = AdAttributeSyntax.Integer,
-            ["uSNChanged"] = AdAttributeSyntax.Integer,
+            // LargeInteger (64-bit), distinct from the 32-bit Integer family below: USNs
+            // exceed Int32 in any directory that has replicated for a while.
+            ["uSNCreated"] = AdAttributeSyntax.LargeInteger,
+            ["uSNChanged"] = AdAttributeSyntax.LargeInteger,
             ["msDS-SupportedEncryptionTypes"] = AdAttributeSyntax.Integer,
             ["gPOptions"] = AdAttributeSyntax.Integer,
             ["minPwdLength"] = AdAttributeSyntax.Integer,

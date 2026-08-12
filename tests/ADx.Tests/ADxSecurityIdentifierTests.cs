@@ -28,6 +28,21 @@ public class ADxSecurityIdentifierTests
         Assert.Equal("S-1-5-21-3623811015-3361044348-30300820", sid.AccountDomainSid);
     }
 
+    [Theory]
+    // Matching SecurityIdentifier.AccountDomainSid: null for anything that is not an
+    // account SID -- the old last-dash strip fabricated "S-1-5-32" for BUILTIN groups,
+    // which every domain has, breaking "is this principal in my domain" comparisons.
+    [InlineData("S-1-5-32-544", null)]
+    [InlineData("S-1-5-18", null)]
+    [InlineData("S-1-1-0", null)]
+    // The domain SID is its own account domain.
+    [InlineData("S-1-5-21-1-2-3", "S-1-5-21-1-2-3")]
+    [InlineData("S-1-5-21-1-2-3-513", "S-1-5-21-1-2-3")]
+    public void AccountDomainSid_IsNullForNonAccountSids(string sddl, string? expected)
+    {
+        Assert.Equal(expected, new ADxSecurityIdentifier(sddl).AccountDomainSid);
+    }
+
     [Fact]
     public void EqualsString_IsCaseInsensitive()
     {

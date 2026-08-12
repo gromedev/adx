@@ -103,13 +103,15 @@ public class AdObjectSchemaTests
     {
         var list = AdRsatProjector.BuildFetchList(AdObjectSchema.Account, null, false, out _);
 
-        // Enabled and PasswordNeverExpires both collapse onto userAccountControl.
+        // Enabled and PasswordNeverExpires both collapse onto userAccountControl; LockedOut
+        // and PasswordExpired both collapse onto the computed UAC (first mention wins the
+        // position), and nothing in the account preset needs lockoutTime any more.
         Assert.Equal(
             new[]
             {
                 "accountExpires", "distinguishedName", "userAccountControl", "lastLogonTimestamp",
-                "lockoutTime", "name", "objectClass", "objectGUID",
-                "msDS-User-Account-Control-Computed", "sAMAccountName", "objectSid", "userPrincipalName"
+                "msDS-User-Account-Control-Computed", "name", "objectClass", "objectGUID",
+                "sAMAccountName", "objectSid", "userPrincipalName"
             },
             list);
     }

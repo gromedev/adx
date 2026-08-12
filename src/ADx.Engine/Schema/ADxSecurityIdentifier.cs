@@ -12,14 +12,17 @@ public sealed class ADxSecurityIdentifier : IEquatable<ADxSecurityIdentifier>
     /// <summary>The SDDL form, e.g. "S-1-5-21-...-512".</summary>
     public string Value { get; }
 
-    /// <summary>The domain portion: the full SDDL minus the trailing RID.</summary>
+    /// <summary>
+    /// The account-domain SID (<c>S-1-5-21-a-b-c</c>) when this is an account SID, else null
+    /// -- the same contract as <c>SecurityIdentifier.AccountDomainSid</c>, which is null for
+    /// builtin and well-known SIDs rather than a fabricated prefix like "S-1-5-32".
+    /// </summary>
     public string? AccountDomainSid { get; }
 
     public ADxSecurityIdentifier(string sddl)
     {
         Value = sddl ?? throw new ArgumentNullException(nameof(sddl));
-        var lastDash = sddl.LastIndexOf('-');
-        AccountDomainSid = lastDash > 0 ? sddl.Substring(0, lastDash) : null;
+        AccountDomainSid = LdapConvert.SidAccountDomain(sddl);
     }
 
     /// <summary>Build from a binary <c>objectSid</c>/<c>sIDHistory</c> value. Null if malformed.</summary>

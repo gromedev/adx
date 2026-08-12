@@ -573,7 +573,8 @@ internal sealed class AdFilterParser
     private static LdapAssertionValue MarshalExact(AdAttributeSyntax syntax, object rawValue, string propertyText) =>
         syntax switch
         {
-            AdAttributeSyntax.Integer => LdapAssertionValue.Verbatim(ToIntegerText(rawValue, propertyText)),
+            AdAttributeSyntax.Integer or AdAttributeSyntax.LargeInteger =>
+                LdapAssertionValue.Verbatim(ToIntegerText(rawValue, propertyText)),
             AdAttributeSyntax.Boolean => LdapAssertionValue.Verbatim(ToLdapBooleanText(rawValue, propertyText)),
             AdAttributeSyntax.GeneralizedTime => LdapAssertionValue.Verbatim(LdapConvert.ToGeneralizedTime(ToDateTime(rawValue, propertyText))),
             AdAttributeSyntax.FileTime => MarshalFileTime(rawValue, propertyText),
@@ -665,7 +666,8 @@ internal sealed class AdFilterParser
     private static LdapAssertionValue MarshalOrdering(AdAttributeSyntax syntax, object rawValue, string propertyText) =>
         syntax switch
         {
-            AdAttributeSyntax.Integer or AdAttributeSyntax.FileTime or AdAttributeSyntax.GeneralizedTime =>
+            AdAttributeSyntax.Integer or AdAttributeSyntax.LargeInteger
+                or AdAttributeSyntax.FileTime or AdAttributeSyntax.GeneralizedTime =>
                 MarshalExact(syntax, rawValue, propertyText),
             AdAttributeSyntax.Interval => throw IntervalNotFilterable(propertyText),
             AdAttributeSyntax.String => LdapAssertionValue.Exact(ToNonEmptyText(rawValue, propertyText)),
