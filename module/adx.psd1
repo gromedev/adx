@@ -47,26 +47,38 @@
             LicenseUri   = 'https://github.com/gromedev/adx/blob/main/LICENSE'
             ProjectUri   = 'https://github.com/gromedev/adx'
             ReleaseNotes = @'
-v0.3.0 - Correctness release: every finding from a full four-reviewer audit fixed
+v0.3.0 - Multi-domain truth and loud limits: the four-reviewer audit closes
+- Global Catalog binds no longer count other domains' primary-group members: a GC cannot
+  resolve foreign RIDs, so the RID arms are dropped and a warning says what was excluded
+- Foreign-member warnings now cover groups past MaxValRange: the full range walk completes
+  before the check, so >1,500-member groups warn as accurately as small ones
+- Loud where it was silent: -ResultSetSize warns on truncation (and no longer overflows at
+  [int]::MaxValue); the paging empty-page guard announces abandonment; SizeLimit-truncated
+  pages are salvaged only when the caller set the limit -- server administrative limits keep
+  terminating; Get-ADxGroupNested no longer warns about members it was asked to exclude
+- ConnectTimeoutSeconds is honoured; Ctrl-C during cancellation no longer races a disposed
+  token source; examples now cover all 17 cmdlets
+
+v0.2.9 - Projection fidelity and identity resolution: audit fixes, second tranche
 - Silent-wrong-answer fixes: RBCD/gMSA security descriptors no longer null when their bytes
-  decode as UTF-8; DateTime variables and date strings in -Filter now agree (Kind=Unspecified
-  is local, matching RSAT); LockedOut reads the DC-computed lockout bit so expired lockouts
-  read False; Get-ADxPrincipalGroupMembership resolves computer names (WS01) like RSAT;
-  Global Catalog binds no longer count other domains' primary-group members (warned instead)
+  decode as UTF-8 (the forced-byte set is schema-derived now); LockedOut reads the DC-computed
+  lockout bit so expired lockouts read False; Get-ADxPrincipalGroupMembership resolves
+  computer names (WS01) like RSAT
+- Fidelity: Description is a scalar string; Integer-syntax attributes are Int32 (uSN* stay
+  Int64); AccountDomainSid is null for non-account SIDs
+- New: GUID identities resolved across partitions (<GUID=...> reads), RSAT's
+  SecurityIdentifier accepted as -Identity
+
+v0.2.8 - Filter translation: new operators, honest errors; audit fixes, first tranche
 - '*' in an -eq/-ne value is now a terminating error: RSAT reads it as a wildcard, PowerShell
   as a literal, and silently picking either can invert a result set ("mail -ne '*'"). The
   error offers -like/-notlike, $null tests, and -LDAPFilter spellings
-- New: -approx operator, -RecursiveMatch on any DN-valued attribute (manager chains),
-  underscore attribute names, GUID identities resolved across partitions (<GUID=...> reads),
-  RSAT's SecurityIdentifier accepted as -Identity
-- Fidelity: Description is a scalar string; Integer-syntax attributes are Int32 (uSN* stay
-  Int64); AccountDomainSid is null for non-account SIDs; sub-second time bounds round
-  direction-aware; pre-1601 timestamps error cleanly
-- Loud where it was silent: -ResultSetSize warns on truncation; the paging empty-page guard
-  announces abandonment; SizeLimit-truncated pages are salvaged, not discarded;
-  foreign-member warnings now cover groups past MaxValRange
-- ConnectTimeoutSeconds is honoured; Ctrl-C during cancellation no longer races a disposed
-  token source; examples now cover all 17 cmdlets
+- DateTime variables and date strings in -Filter now agree (Kind=Unspecified is local,
+  matching RSAT); sub-second time bounds round direction-aware; pre-1601 timestamps error
+  cleanly
+- New: -approx operator, -RecursiveMatch on any link-valued DN attribute (manager chains) --
+  and only those, so degenerate walks on objectCategory are rejected; underscore attribute
+  names in filters
 
 v0.2.7 - Three more read cmdlets: service accounts, fine-grained policies, account search
 - Get-ADxServiceAccount (Get-ADServiceAccount): standalone and group-managed service accounts,

@@ -1,41 +1,64 @@
 # Changelog
 
-## 0.3.0 — 2026-08-13
+## 0.3.0
 
 ### Fixed
 
-- Fixed binary-attribute drift where msDS-AllowedToActOnBehalfOfOtherIdentity and msDS-GroupMSAMembership projected null when decoding as UTF-8. The forced-byte array set is now schema-derived.
-- Fixed DateTime skew where Kind=Unspecified values marshalled as UTC instead of local time.
-- Fixed LockedOut property over-reporting by reading the computed ADS_UF_LOCKOUT bit instead of stale lockoutTime values. Filter-side queries retain lockoutTime.
-- Fixed Get-ADxPrincipalGroupMembership failing on computer names missing the trailing '$' suffix.
 - Fixed Global Catalog primaryGroupID queries matching accounts in external domains on ports 3268/3269. GC binds now drop RID arms and warn.
 - Fixed foreign-member warning detection in Get-ADxGroupMember and Get-ADxPrincipalGroupMembership to complete the full MaxValRange walk before checking for foreign members.
 - Fixed SizeLimitExceeded partial page salvaging so it only applies when the caller explicitly sets a SizeLimit, preserving loud errors on server administrative limits.
-- Fixed -ResultSetSize truncation warnings across Search-ADxAccount and membership cmdlets, and fixed an overflow crash when set to [int]::MaxValue.
-- Fixed -RecursiveMatch to restrict usage to link-valued DN attributes, blocking degenerate walks on objectCategory and distinguishedName.
+- Fixed an overflow crash when -ResultSetSize is set to [int]::MaxValue.
 - Fixed Get-ADxGroupNested emitting irrelevant primary-group warnings for excluded members.
 - Fixed a Ctrl-C cancellation race condition during disposal in LdapEntry.
 
 ### Changed
 
-- Using '*' wildcards in -eq and -ne filter values now throws a terminating error rather than silently escaping it.
-- -ResultSetSize now issues a warning when output is truncated.
-- GeneralizedTime bounds round direction-aware against sub-second values, and exact sub-second equality checks are rejected. Pre-1601 timestamps return clean translation errors.
+- -ResultSetSize now issues a warning when output is truncated, across object, membership, and Search-ADxAccount cmdlets.
 - Paging empty-page abandons now route through the warning channel, and Search-ADxObject no longer emits false warnings on single-page sets.
+
+### Added
+
+- Added consumption of ConnectTimeoutSeconds, separating connection timeouts from search timeouts.
+
+## 0.2.9
+
+### Fixed
+
+- Fixed binary-attribute drift where msDS-AllowedToActOnBehalfOfOtherIdentity and msDS-GroupMSAMembership projected null when decoding as UTF-8. The forced-byte array set is now schema-derived.
+- Fixed LockedOut property over-reporting by reading the computed ADS_UF_LOCKOUT bit instead of stale lockoutTime values. Filter-side queries retain lockoutTime.
+- Fixed Get-ADxPrincipalGroupMembership failing on computer names missing the trailing '$' suffix.
+
+### Changed
+
 - Description attributes project as scalar strings rather than arrays.
 - Integer-syntax attributes project as Int32 (while LargeInteger syntax keeps Int64 for uSNCreated/uSNChanged).
 - AccountDomainSid returns null for non-account SIDs instead of fabricating domain SIDs for BUILTIN principals.
+
+### Added
+
+- Added extended-DN (<GUID=...>) resolution for GUID identities, reaching configuration and schema partitions.
+- Added support for SecurityIdentifier objects as -Identity input on security-principal cmdlets.
+
+## 0.2.8
+
+### Fixed
+
+- Fixed DateTime skew where Kind=Unspecified values marshalled as UTC instead of local time, so date strings and DateTime variables in -Filter produce the same query.
+
+### Changed
+
+- Using '*' wildcards in -eq and -ne filter values now throws a terminating error rather than silently escaping it.
+- GeneralizedTime bounds round direction-aware against sub-second values, and exact sub-second equality checks are rejected. Pre-1601 timestamps return clean translation errors.
+- -RecursiveMatch is restricted to link-valued DN attributes, blocking degenerate walks on objectCategory and distinguishedName.
 - GroupCategory -ne 'Distribution' now emits a single optimized negation filter.
 
 ### Added
 
-- Added support for the -approx operator (LDAP '~=') and -RecursiveMatch on DN-valued attributes for manager chain walks.
+- Added support for the -approx operator (LDAP '~=').
+- Added -RecursiveMatch on all link-valued DN attributes (manager and managedBy chain walks), beyond member and memberOf.
 - Added support for underscore attribute names in filters.
-- Added extended-DN (<GUID=...>) resolution for GUID identities, reaching configuration and schema partitions.
-- Added support for SecurityIdentifier objects as -Identity input on security-principal cmdlets.
-- Added consumption of ConnectTimeoutSeconds and partial page recovery on SizeLimit truncation.
 
-## 0.2.7 — 2026-08-12
+## 0.2.7
 
 ### Added
 
@@ -60,7 +83,7 @@
   - -PasswordExpired excludes accounts flagged for "must change password at next logon" (pwdLastSet = 0).
   - Default unscoped population matches objectClass=user (includes service accounts, not just users/computers).
 
-## 0.2.6 — 2026-08-12
+## 0.2.6
 
 ### Added
 
@@ -81,7 +104,7 @@
 
 - Added missing -Properties argument completer to Get-ADxPrincipalGroupMembership.
 
-## 0.2.5 — 2026-08-11
+## 0.2.5
 
 ### Added
 
@@ -90,7 +113,7 @@
   - Uses member searches instead of memberOf attributes to prevent MaxValRange truncation on accounts with >1,500 groups.
   - Emits Global-Catalog-aware warnings when membership spans into external, unsearched forest partitions.
 
-## 0.2.4 — 2026-08-11
+## 0.2.4
 
 ### Changed
 
@@ -100,7 +123,7 @@
 
 - Multi-Domain Ambiguity: Binding Global Catalog endpoints (-Port 3268) throws ADxIdentityAmbiguous when search names (e.g., Administrators) exist in multiple domains.
 
-## 0.2.3 — 2026-08-11
+## 0.2.3
 
 ### Fixed
 
@@ -111,13 +134,13 @@
 
 - Get-ADxGroupMember -Recursive: Expanded recursion to include primaryGroupID relationships across nested groups, capturing effective domain membership (e.g., returning all domain users when evaluating BUILTIN\Users).
 
-## 0.2.2 — 2026-08-11
+## 0.2.2
 
 ### Fixed
 
 - Non-Windows Auth Error Messaging: When using -AuthType Negotiate or Kerberos with -Credential on Linux/macOS, errors now explicitly explain platform SASL/GSSAPI limitations and suggest -AuthType Basic -UseSsl or using kinit.
 
-## 0.2.1 — 2026-08-11
+## 0.2.1
 
 ### Fixed
 
@@ -134,7 +157,7 @@
 
 - Cleartext credential warning thrown when using -AuthType Basic without -UseSsl or on unsigned non-Windows connections.
 
-## 0.2.0 — 2026-08-11
+## 0.2.0
 
 ### Added
 
@@ -151,7 +174,7 @@
 - Output formatting mimics RSAT (PascalCase properties, single-string ObjectClass, local DateTime, SID objects).
 - Default result set sizes changed to unlimited to mirror RSAT defaults.
 
-## 0.1.0 — 2026-08-10
+## 0.1.0
 
 ### Added
 
