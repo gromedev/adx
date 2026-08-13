@@ -62,7 +62,9 @@ public abstract class ADxMembershipQueryCmdletBase : ADxCmdletBase
         var iterator = new LdapPageIterator(GetConnection());
         var enumerable = iterator.StreamAsync(
             spec,
-            maxItems: ResultSetSize,
+            // One past the cap: the extra entry only proves truncation and is never emitted.
+            // Long arithmetic so -ResultSetSize [int]::MaxValue cannot wrap negative.
+            maxItems: ResultSetSize > 0 ? (long)ResultSetSize + 1 : 0,
             onPageComplete: info => EnqueueVerbose(
                 $"Page {info.PageIndex}: {info.EntriesInPage} entries ({info.TotalEmitted} total)."),
             skipFirst: 0,
@@ -70,11 +72,18 @@ public abstract class ADxMembershipQueryCmdletBase : ADxCmdletBase
             cancellationToken: CancellationToken);
 
         long emitted = 0;
+        var truncated = false;
         var enumerator = enumerable.GetAsyncEnumerator(CancellationToken);
         try
         {
             while (enumerator.MoveNextAsync().AsTask().GetAwaiter().GetResult())
             {
+                if (ResultSetSize > 0 && emitted == ResultSetSize)
+                {
+                    truncated = true;
+                    break;
+                }
+
                 var entry = enumerator.Current;
                 if (LdapRangeRetriever.NeedsCompletion(entry))
                 {
@@ -94,6 +103,10 @@ public abstract class ADxMembershipQueryCmdletBase : ADxCmdletBase
         }
 
         DrainMessages();
+        if (truncated)
+            WriteWarning(
+                $"More members match than -ResultSetSize {ResultSetSize}; the result set is truncated. " +
+                "Raise -ResultSetSize, or drop it for the full set.");
         WriteVerbose($"Returned {emitted} {outputSchema.TypeLabel}(s).");
     }
 

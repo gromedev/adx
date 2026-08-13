@@ -355,6 +355,30 @@ public class AdFilterTranslatorTests
         Assert.Equal(expected, T(filter));
     }
 
+    [Fact]
+    public void ApproxOperator_OnGeneralizedTime_SharesTheSubSecondDoctrine()
+    {
+        // AD evaluates '~=' as plain equality, so approx must not slip past the
+        // whole-second gate that -eq is held to: whole seconds emit, fractions refuse.
+        var whole = new DateTime(2024, 1, 2, 3, 4, 5, DateTimeKind.Utc);
+        Assert.Equal("(whenCreated~=20240102030405.0Z)", T("whenCreated -approx $d", Vars(("d", whole))));
+
+        var fractional = whole.AddMilliseconds(789);
+        Assert.Throws<AdFilterTranslationException>(
+            () => T("whenCreated -approx $d", Vars(("d", fractional))));
+    }
+
+    [Fact]
+    public void SubSecondLowerBoundInTheFinalRepresentableSecond_IsACleanTranslationError()
+    {
+        // ceil() of a fraction inside DateTime's last second cannot be represented;
+        // AddSeconds(1) would throw a raw ArgumentOutOfRangeException that escapes the
+        // translation-error contract -- the GeneralizedTime twin of the pre-1601 case.
+        var ex = Assert.Throws<AdFilterTranslationException>(
+            () => T("whenCreated -ge $d", Vars(("d", DateTime.SpecifyKind(DateTime.MaxValue, DateTimeKind.Utc)))));
+        Assert.Contains("final second", ex.Message);
+    }
+
     // ---- underscore attribute names (legal in ldapDisplayName, common in HR-sync schemas) ----
 
     [Fact]

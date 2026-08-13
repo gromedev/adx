@@ -164,11 +164,14 @@ pwsh -NoProfile -File ./build.ps1 -Configuration Release
 
 ### Known limitations
 
-- **Global Catalog binds drop primary-group reconciliation, with a warning.** `primaryGroupID`
-  holds a domain-relative RID, and matching it across a GC's forest-wide namespace would count
-  *other* domains' accounts (every child domain's RID-513 users, say) as members of the queried
-  group. On port 3268/3269 the membership cmdlets therefore emit only the `memberOf` arms and
-  warn that primary-group members are excluded; bind the group's own domain to include them.
+- **Global Catalog binds drop primary-group reconciliation in `Get-ADxGroupMember`, with a
+  warning.** `primaryGroupID` holds a domain-relative RID, and matching it across a GC's
+  forest-wide namespace would count *other* domains' accounts (every child domain's RID-513
+  users, say) as members of the queried group. On port 3268/3269 `Get-ADxGroupMember`
+  therefore emits only the `memberOf` arms and warns that primary-group members are excluded;
+  bind the group's own domain to include them. `Get-ADxPrincipalGroupMembership` is unaffected
+  — it matches the primary group by its full, forest-unique SID — and `Get-ADxGroupNested`
+  never consults `primaryGroupID` at all.
 - **Multi-domain forests:** the membership cmdlets — `Get-ADxGroupMember`, `Get-ADxGroupNested`,
   and `Get-ADxPrincipalGroupMembership` — enumerate within one domain partition, so a membership
   in another domain of the forest is not returned. This is structural, not a tuning problem: a

@@ -57,6 +57,17 @@ public sealed class GetADxPrincipalGroupMembership : ADxMembershipQueryCmdletBas
                     $"'{principal.DistinguishedName}' has no readable objectSid/primaryGroupID; its PRIMARY " +
                     "group (Domain Users for an ordinary account) cannot be included.");
 
+            // memberOf rides along for foreign-partition detection; past MaxValRange the
+            // resolution read holds only the first range block, and a foreign membership at
+            // index 1500+ would evade the warning -- complete the walk first, same as the
+            // group-facing cmdlets do for member.
+            if (LdapRangeRetriever.NeedsCompletion(principal))
+            {
+                principal = LdapRangeRetriever
+                    .CompleteAsync(GetConnection(), principal, CancellationToken, EnqueueWarning)
+                    .GetAwaiter().GetResult();
+                DrainMessages();
+            }
             WarnOnForeignPartitionMemberships(principal);
 
             var filter = AdGroupMemberQuery.PrincipalGroups(principal.DistinguishedName, primaryGroupSid);

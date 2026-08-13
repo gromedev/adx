@@ -132,9 +132,11 @@ public abstract class ADxObjectCmdletBase : ADxCmdletBase
         // against 31ms once the page is capped, on the same query returning the same object.
         // Only ever shrinks the page, so bulk enumeration (ResultSetSize 0 = unlimited) is
         // untouched. The +1 is the truncation probe: one extra entry proves whether the cap
-        // cut the result set, and it rides inside the same page.
+        // cut the result set, and it rides inside the same page. Long arithmetic: with
+        // -ResultSetSize [int]::MaxValue an Int32 +1 wraps negative and the page control
+        // throws.
         var effectivePageSize = ResultSetSize > 0
-            ? Math.Min(ResultPageSize, ResultSetSize + 1)
+            ? (int)Math.Min(ResultPageSize, (long)ResultSetSize + 1)
             : ResultPageSize;
 
         var spec = new LdapSearchSpec(
@@ -151,7 +153,7 @@ public abstract class ADxObjectCmdletBase : ADxCmdletBase
         var enumerable = iterator.StreamAsync(
             spec,
             // One past the cap: the extra entry only proves truncation and is never emitted.
-            maxItems: ResultSetSize > 0 ? ResultSetSize + 1 : 0,
+            maxItems: ResultSetSize > 0 ? (long)ResultSetSize + 1 : 0,
             onPageComplete: info => EnqueueVerbose(
                 $"Page {info.PageIndex}: {info.EntriesInPage} entries ({info.TotalEmitted} total)."),
             skipFirst: 0,

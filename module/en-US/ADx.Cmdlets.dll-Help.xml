@@ -10668,7 +10668,7 @@ PS C:\&gt; Get-ADxUser -Filter "LastLogonDate -lt $cutoff" -Properties LastLogon
         <maml:title>-------------------------- Example 4 --------------------------</maml:title>
         <dev:code>PS C:\&gt; Search-ADxAccount -LockedOut</dev:code>
         <dev:remarks>
-          <maml:para>Currently locked-out accounts.</maml:para>
+          <maml:para>Accounts whose stored lockout flag (lockoutTime) is set. This can include accounts whose lockout window has already expired - see DESCRIPTION; the projected LockedOut column reads the DC-computed bit and is the truth.</maml:para>
         </dev:remarks>
       </command:example>
       <command:example>

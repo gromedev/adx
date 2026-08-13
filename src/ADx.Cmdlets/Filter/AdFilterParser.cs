@@ -446,8 +446,10 @@ internal sealed class AdFilterParser
         // GeneralizedTime comparisons get their own builder: AD stores these attributes at
         // whole-second precision, so a sub-second bound must be rounded direction-aware (with
         // the operator adjusted to keep the comparison exact) rather than silently truncated.
+        // -approx is included: AD evaluates '~=' as plain equality, so it shares -eq's
+        // sub-second refusal rather than slipping through to a silent truncation.
         if (syntax == AdAttributeSyntax.GeneralizedTime &&
-            operatorId is "eq" or "ne" or "ge" or "gt" or "le" or "lt")
+            operatorId is "eq" or "ne" or "approx" or "ge" or "gt" or "le" or "lt")
             return BuildGeneralizedTimeComparison(ldapName, operatorId, rawValue, propertyText);
 
         return operatorId switch
@@ -491,6 +493,7 @@ internal sealed class AdFilterParser
             {
                 "eq" => new AdFilterEquality(ldapName, value),
                 "ne" => new AdFilterInequality(ldapName, value),
+                "approx" => new AdFilterApprox(ldapName, value),
                 "ge" => new AdFilterGreaterOrEqual(ldapName, value),
                 "gt" => new AdFilterGreaterThan(ldapName, value),
                 "le" => new AdFilterLessOrEqual(ldapName, value),
@@ -501,6 +504,14 @@ internal sealed class AdFilterParser
         var floor = new DateTime(utc.Ticks - fractionalTicks, DateTimeKind.Utc);
         return operatorId switch
         {
+            // A fractional bound inside the FINAL representable second has no whole-second
+            // ceiling: AddSeconds(1) would throw a raw ArgumentOutOfRangeException, escaping
+            // the translation-error contract exactly like the pre-1601 FILETIME case.
+            "ge" or "gt" when floor.Ticks > DateTime.MaxValue.Ticks - TimeSpan.TicksPerSecond =>
+                throw new AdFilterTranslationException(
+                    $"'{propertyText}' cannot be compared against a bound inside the final second of the " +
+                    "representable time range: no whole-second timestamp can satisfy it, so the filter " +
+                    "could only successfully match nothing."),
             "ge" or "gt" => new AdFilterGreaterOrEqual(
                 ldapName, LdapAssertionValue.Verbatim(LdapConvert.ToGeneralizedTime(floor.AddSeconds(1)))),
             "le" or "lt" => new AdFilterLessOrEqual(
@@ -553,14 +564,15 @@ internal sealed class AdFilterParser
 
     private static AdFilterNode BuildRecursiveMatch(string ldapName, object rawValue, string propertyText)
     {
-        // The 1941 chain rule walks any DN-linked attribute (manager chains are a real, if
-        // exotic, use RSAT accepts), so the gate is the schema's Dn syntax, not a hard-coded
-        // member/memberOf pair. Non-DN attributes stay a loud error: AD would answer the
-        // structurally valid filter with zero rows and a success code.
-        if (AdAttributeSchema.SyntaxOf(ldapName) != AdAttributeSyntax.Dn)
+        // The 1941 chain rule walks LINK-valued attributes (manager chains are a real, if
+        // exotic, use RSAT accepts). Plain DN-SYNTAX attributes with no link pair
+        // (objectCategory, distinguishedName, fSMORoleOwner) are not walkable -- the chain
+        // is degenerate there, and AD would answer the structurally valid filter with the
+        // wrong set and a success code, so they stay a loud error.
+        if (!AdAttributeSchema.IsLinkValuedDnAttribute(ldapName))
             throw new AdFilterTranslationException(
-                $"'-RecursiveMatch' (transitive chain matching) only applies to DN-valued attributes such as " +
-                $"'member', 'memberOf' or 'manager'; '{propertyText}' is not DN-valued.");
+                $"'-RecursiveMatch' (transitive chain matching) only applies to link-valued DN attributes " +
+                $"such as 'member', 'memberOf' or 'manager'; '{propertyText}' is not one.");
 
         if (rawValue is not string dn || dn.Length == 0)
             throw new AdFilterTranslationException("'-RecursiveMatch' needs a distinguished name string.");
@@ -603,11 +615,12 @@ internal sealed class AdFilterParser
     {
         if (text.Contains('*'))
             throw new AdFilterTranslationException(
-                $"'{propertyText}' compared with -eq/-ne against a value containing '*': RSAT would treat the '*' " +
-                "as a wildcard, PowerShell's -eq means a literal asterisk, and silently picking either can invert " +
-                "the result set (RSAT's \"mail -ne '*'\" means \"mail absent\"). Use -like/-notlike for wildcard " +
-                "or presence semantics (\"mail -notlike '*'\" is \"mail absent\"), '-eq $null'/'-ne $null' for " +
-                "presence tests, or -LDAPFilter with the escaped value '\\2a' for a literal asterisk.");
+                $"'{propertyText}' compared with an exact-match operator (-eq/-ne/-approx) against a value " +
+                "containing '*': RSAT would treat the '*' as a wildcard, PowerShell's -eq means a literal " +
+                "asterisk, and silently picking either can invert the result set (RSAT's \"mail -ne '*'\" means " +
+                "\"mail absent\"). Use -like/-notlike on string attributes for wildcard or presence semantics " +
+                "(\"mail -notlike '*'\" is \"mail absent\"), '-eq $null'/'-ne $null' for presence tests on any " +
+                "attribute, or -LDAPFilter with the escaped value '\\2a' for a literal asterisk.");
         return text;
     }
 

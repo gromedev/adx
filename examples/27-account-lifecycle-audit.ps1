@@ -45,9 +45,14 @@ Search-ADxAccount -AccountExpiring -TimeSpan 30.00:00:00 -UsersOnly |
 Search-ADxAccount -AccountInactive -TimeSpan 90.00:00:00 -UsersOnly |
     Select-Object Name, SamAccountName, Enabled, LastLogonDate | Format-Table -AutoSize
 
-# --- Locked out, right now ---
+# --- Lockout flags set - which is not the same as "locked out right now" ---
+# -LockedOut tests the stored lockoutTime, matching RSAT's Search-ADAccount. AD clears
+# that attribute only on the next successful logon or an admin unlock, NOT when the
+# lockout window expires - so this can return accounts whose lockout has already lapsed.
+# The LockedOut column each result projects reads the DC-computed bit instead and shows
+# False for those; when the two disagree, trust the column.
 Search-ADxAccount -LockedOut |
-    Select-Object Name, SamAccountName, ObjectClass | Format-Table -AutoSize
+    Select-Object Name, SamAccountName, LockedOut, ObjectClass | Format-Table -AutoSize
 
 # --- Expired passwords: the one criterion the server cannot answer ---
 # The PASSWORD_EXPIRED bit lives in msDS-User-Account-Control-Computed - a

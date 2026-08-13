@@ -187,6 +187,25 @@ public static class AdAttributeSchema
                 : ldapAttributeName);
 
     /// <summary>
+    /// The DN-syntax attributes that are LINK-valued -- backed by a forward/back link pair in
+    /// the AD schema -- which is what the 1941 chain rule (<c>-RecursiveMatch</c>) actually
+    /// walks. Plain DN-syntax attributes (objectCategory, fSMORoleOwner...) carry a DN but no
+    /// link, so a chain filter over them is degenerate: structurally valid, wrong set,
+    /// success code.
+    /// </summary>
+    private static readonly HashSet<string> LinkValuedDnAttributes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "member", "memberOf", "manager", "managedBy",
+        "msDS-HostServiceAccountBL", "msDS-PSOAppliesTo",
+    };
+
+    public static bool IsLinkValuedDnAttribute(string ldapAttributeName) =>
+        LinkValuedDnAttributes.Contains(
+            LdapEntry.TryParseRangeOption(ldapAttributeName, out var baseName, out _, out _, out _)
+                ? baseName!
+                : ldapAttributeName);
+
+    /// <summary>
     /// Every attribute whose wire value is bytes, not text: the <see cref="AdAttributeSyntax.Sid"/>,
     /// <see cref="AdAttributeSyntax.Guid"/> and <see cref="AdAttributeSyntax.Binary"/> entries.
     /// The LDAP client unions this into its forced-byte[] retrieval set, so declaring a new

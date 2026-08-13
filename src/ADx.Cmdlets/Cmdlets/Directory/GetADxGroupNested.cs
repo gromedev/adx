@@ -16,9 +16,12 @@ namespace ADx.Cmdlets.Cmdlets.Directory;
 [OutputType(typeof(PSObject))]
 public sealed class GetADxGroupNested : ADxGroupQueryCmdletBase
 {
+    // Groups are never anyone's primary group in practice (primaryGroupID points at
+    // Domain Users/Computers/Controllers), so the RID arm does not apply here -- and the
+    // base's primary-group warnings (unreadable SID, Global Catalog exclusion) do not either.
+    protected override bool UsesPrimaryGroupRids => false;
+
     protected override (string Filter, AdObjectSchema OutputSchema) BuildQuery(
         GroupMembershipTarget target) =>
-        // Groups are never anyone's primary group in practice (primaryGroupID points at
-        // Domain Users/Computers/Controllers), so the RID arm does not apply here.
         (AdGroupMemberQuery.NestedGroups(target.GroupDn), AdObjectSchema.Group);
 }

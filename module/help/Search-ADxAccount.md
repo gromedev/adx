@@ -124,7 +124,9 @@ Accounts expiring within the next two weeks.
 PS C:\> Search-ADxAccount -LockedOut
 ```
 
-Currently locked-out accounts.
+Accounts whose stored lockout flag (lockoutTime) is set. This can include accounts whose
+lockout window has already expired - see DESCRIPTION; the projected LockedOut column reads the
+DC-computed bit and is the truth.
 
 ### Example 5
 ```powershell

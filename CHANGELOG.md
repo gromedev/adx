@@ -62,6 +62,33 @@ layer, LDAP engine, packaging/docs) fixed, with tests pinning each fix.
   the case-insensitive-key promise; a Ctrl-C race against the disposed cancellation source is
   fixed.
 
+### Fixed — from the release's own adversarial review
+
+A second review pass over the 0.3.0 diff itself (four lenses, each finding independently
+attacked before acceptance) confirmed and fixed:
+
+- The SizeLimitExceeded salvage now fires only when the CALLER set a SizeLimit; a server's own
+  administrative limit (OpenLDAP defaults to 500) cutting an unbounded stream stays the loud
+  LimitsExceeded error instead of masquerading as a clean end of results.
+- The -ResultSetSize truncation warning now actually covers every cmdlet that exposes the
+  parameter: Search-ADxAccount and the membership cmdlets truncated silently while the README
+  claimed otherwise. -ResultSetSize [int]::MaxValue no longer overflows the +1 probe into a
+  crash (long arithmetic).
+- -approx on a GeneralizedTime attribute is held to the same sub-second doctrine as -eq
+  (AD evaluates '~=' as equality); it previously slipped past the gate and silently truncated.
+- A sub-second -ge/-gt bound inside DateTime's final representable second is a clean
+  translation error instead of an unwrapped ArgumentOutOfRangeException.
+- -RecursiveMatch is gated to LINK-valued DN attributes; the Dn-syntax gate had quietly
+  admitted objectCategory/distinguishedName, where the 1941 chain walk is degenerate.
+- Get-ADxPrincipalGroupMembership completes the memberOf range walk before its
+  foreign-partition warning (the principal-side twin of the group-side fix).
+- Get-ADxGroupNested no longer emits primary-group warnings (SID-unreadable, GC exclusion)
+  about members its query never includes.
+- README no longer sweeps Get-ADxPrincipalGroupMembership into the GC primary-group drop (it
+  matches by full SID and is immune); the "locked out right now" captions in example 27 and
+  the Search-ADxAccount help now agree with the documented stale-lockout semantics; the
+  wildcard-rejection message no longer claims -eq/-ne when -approx triggered it.
+
 ### Docs / packaging
 
 - The private agent-runner scripts under tests/scripts/ are untracked (they predated their

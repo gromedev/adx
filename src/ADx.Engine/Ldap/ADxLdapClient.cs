@@ -343,14 +343,19 @@ public sealed class ADxLdapClient : ILdapSearchExecutor
             response = (SearchResponse)await SendAsync(request, cancellationToken).ConfigureAwait(false);
         }
         catch (DirectoryOperationException ex)
-            when (ex.Response is SearchResponse partial && partial.ResultCode == ResultCode.SizeLimitExceeded)
+            when (spec.SizeLimit > 0 &&
+                  ex.Response is SearchResponse partial && partial.ResultCode == ResultCode.SizeLimitExceeded)
         {
-            // resultCode 4: the server truncated at the caller's SizeLimit -- and the entries
-            // it DID collect ride inside the exception's response. Discarding them turned an
-            // explicit, caller-chosen limit into an error that threw away the data it asked
-            // for. Salvage the page and report no-more (the server will not continue past
-            // its own refusal). Latent until someone passes SizeLimit > 0; loaded trap
-            // otherwise.
+            // resultCode 4 AND the caller asked for a limit: the server truncated at that
+            // limit, and the entries it DID collect ride inside the exception's response.
+            // Discarding them turned an explicit, caller-chosen limit into an error that
+            // threw away the data it asked for. Salvage the page and report no-more (the
+            // server will not continue past its own refusal).
+            //
+            // The gate on spec.SizeLimit matters: with SizeLimit 0 a resultCode 4 is the
+            // SERVER's own administrative limit (OpenLDAP defaults to 500) cutting an
+            // unbounded stream short -- salvaging that would dress silent truncation up as
+            // a clean end of results, so it stays the loud LimitsExceeded error it was.
             response = partial;
             sizeLimited = true;
         }

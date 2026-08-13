@@ -411,9 +411,13 @@ public class AdFilterTranslatorGuardTests
     [Theory]
     [InlineData("Name -recursivematch 'CN=x,DC=y'")]
     [InlineData("mail -recursivematch 'CN=x,DC=y'")]
-    public void RecursiveMatch_OnlyOnDnValuedAttributes(string filter)
+    // DN-SYNTAX but not link-valued: the 1941 chain rule cannot walk these, and the
+    // structurally valid filter would return the wrong set with a success code.
+    [InlineData("objectCategory -recursivematch 'CN=Person,CN=Schema,CN=Configuration,DC=x'")]
+    [InlineData("distinguishedName -recursivematch 'CN=x,DC=y'")]
+    public void RecursiveMatch_OnlyOnLinkValuedDnAttributes(string filter)
     {
-        FailsWith(filter, "DN-valued");
+        FailsWith(filter, "link-valued");
     }
 
     [Fact]

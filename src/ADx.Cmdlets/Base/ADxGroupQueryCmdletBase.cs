@@ -76,6 +76,14 @@ public abstract class ADxGroupQueryCmdletBase : ADxMembershipQueryCmdletBase
     /// </summary>
     protected virtual bool NeedsNestedPrimaryGroupRids => false;
 
+    /// <summary>
+    /// Whether this cmdlet's query uses primaryGroupID arms at all. Get-ADxGroupNested does
+    /// not (groups are never anyone's primary group), so its subclass opts out and the
+    /// SID-unreadable and Global-Catalog warnings about excluded primary-group members --
+    /// which cannot apply to a query that never includes them -- stay silent.
+    /// </summary>
+    protected virtual bool UsesPrimaryGroupRids => true;
+
     protected override void ProcessRecord()
     {
         try
@@ -92,8 +100,12 @@ public abstract class ADxGroupQueryCmdletBase : ADxMembershipQueryCmdletBase
             // The RID (last SID sub-authority) is what member objects' primaryGroupID holds.
             // A group without a readable SID still gets the memberOf arm; the missing primary
             // reconciliation is warned about, not silently dropped.
-            var rid = LdapConvert.SidRid(group.GetBytes("objectSid"));
-            if (rid is null)
+            var rid = UsesPrimaryGroupRids ? LdapConvert.SidRid(group.GetBytes("objectSid")) : null;
+            if (!UsesPrimaryGroupRids)
+            {
+                // This query never consults primaryGroupID; no warning applies.
+            }
+            else if (rid is null)
             {
                 WriteWarning(
                     $"'{group.DistinguishedName}' has no readable objectSid; members whose PRIMARY group " +

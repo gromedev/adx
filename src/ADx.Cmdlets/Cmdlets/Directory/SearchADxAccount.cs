@@ -100,8 +100,9 @@ public sealed class SearchADxAccount : ADxCmdletBase
             var clientFiltered = criterion == AdAccountSearchQuery.Criterion.PasswordExpired;
             if (clientFiltered)
                 fetch = new List<string>(fetch) { "pwdLastSet" };
+            // +1 is the truncation probe; long arithmetic so [int]::MaxValue cannot wrap.
             var effectivePageSize = ResultSetSize > 0 && !clientFiltered
-                ? Math.Min(ResultPageSize, ResultSetSize)
+                ? (int)Math.Min(ResultPageSize, (long)ResultSetSize + 1)
                 : ResultPageSize;
 
             var spec = new LdapSearchSpec(
@@ -130,6 +131,7 @@ public sealed class SearchADxAccount : ADxCmdletBase
                 cancellationToken: CancellationToken);
 
             long emitted = 0;
+            var truncated = false;
             var enumerator = enumerable.GetAsyncEnumerator(CancellationToken);
             try
             {
@@ -139,10 +141,18 @@ public sealed class SearchADxAccount : ADxCmdletBase
                     if (clientFiltered && !AdAccountSearchQuery.PasswordExpiredPredicate(entry))
                         continue;
 
+                    // The stream runs unbounded (client-side filtering makes a server-side
+                    // cap wrong), so the first MATCHING entry past the cap is the free
+                    // truncation probe: seen, never emitted.
+                    if (ResultSetSize > 0 && emitted == ResultSetSize)
+                    {
+                        truncated = true;
+                        break;
+                    }
+
                     WriteObject(AdRsatProjector.Project(entry, AdObjectSchema.Account, null, fetchAll));
                     emitted++;
                     if (emitted % 500 == 0) DrainMessages();
-                    if (ResultSetSize > 0 && emitted >= ResultSetSize) break;
                 }
             }
             finally
@@ -151,6 +161,10 @@ public sealed class SearchADxAccount : ADxCmdletBase
             }
 
             DrainMessages();
+            if (truncated)
+                WriteWarning(
+                    $"More accounts match than -ResultSetSize {ResultSetSize}; the result set is truncated. " +
+                    "Raise -ResultSetSize, or drop it for the full set.");
             WriteVerbose($"Returned {emitted} account(s).");
         }
         catch (OperationCanceledException) when (CancellationToken.IsCancellationRequested)
