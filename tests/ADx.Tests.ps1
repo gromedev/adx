@@ -219,6 +219,60 @@ Describe 'Assembly binding' {
     }
 }
 
+Describe 'Manifest and release hygiene' {
+
+    BeforeAll {
+        $script:Manifest = Test-ModuleManifest -Path (Join-Path $PSScriptRoot '../module/adx.psd1') -ErrorAction Stop
+    }
+
+    It 'Is a valid module manifest with a parsable version' {
+        $script:Manifest.Name | Should -Be 'adx'
+        $script:Manifest.Version | Should -BeOfType [System.Version]
+    }
+
+    It 'Targets PowerShell 7.5 Core only' {
+        # Built for net9.0; must never claim it can load in Windows PowerShell 5.1
+        $script:Manifest.PowerShellVersion | Should -BeGreaterOrEqual ([Version]'7.5')
+        $script:Manifest.CompatiblePSEditions | Should -Contain 'Core'
+        $script:Manifest.CompatiblePSEditions | Should -Not -Contain 'Desktop'
+    }
+
+    It 'Pre-loads ADx.Engine.dll via RequiredAssemblies' {
+        # Without this, LdapRootDse resolves into a different load context and
+        # Get-ADxRootDse dies at JIT time with TypeLoadException
+        $script:Manifest.RequiredAssemblies | Should -Contain 'ADx.Engine.dll'
+    }
+
+    It 'Exports cmdlets and no functions' {
+        $script:Manifest.ExportedCmdlets.Count | Should -BeGreaterThan 0
+        $script:Manifest.ExportedFunctions.Count | Should -Be 0
+    }
+
+    It 'CHANGELOG documents the manifest version' {
+        # Catches a version bump that forgot its changelog entry
+        $changelog = Get-Content -Path (Join-Path $PSScriptRoot '../CHANGELOG.md') -Raw
+        $changelog | Should -Match ('##\s+{0}' -f [Regex]::Escape($script:Manifest.Version.ToString()))
+    }
+
+    It 'Release notes lead with the manifest version' {
+        $notes = $script:Manifest.PrivateData.PSData.ReleaseNotes
+        $notes | Should -Not -BeNullOrEmpty
+        $notes | Should -Match ('v{0}' -f [Regex]::Escape($script:Manifest.Version.ToString()))
+    }
+
+    It 'Names the module files exactly, byte for byte' {
+        # On a case-sensitive filesystem PowerShell resolves <name>.psd1 against the module
+        # directory byte for byte, so casing drift breaks Import-Module on Linux -- one of
+        # the platforms this module exists for. Get-ChildItem reports on-disk casing even
+        # where the filesystem matches case-insensitively.
+        $moduleRoot = Join-Path $PSScriptRoot '../module'
+        foreach ($file in 'adx.psd1', 'adx.psm1', 'adx.Format.ps1xml') {
+            (Get-ChildItem -Path $moduleRoot -Filter $file).Name | Should -BeExactly $file
+        }
+        $script:Manifest.RootModule | Should -BeExactly 'adx.psm1'
+    }
+}
+
 Describe 'Packaging' {
 
     It 'Must never stage a directory-services assembly' {
@@ -244,6 +298,27 @@ Describe 'Packaging' {
         { Remove-Module ADx -ErrorAction Stop } | Should -Not -Throw
         Get-Module ADx | Should -BeNullOrEmpty
         Import-Module (Join-Path $PSScriptRoot '../module/adx.psd1') -Force
+    }
+
+    It 'Should import, unload, and re-import in a fresh session' {
+        # The in-process check above runs with Pester's own module bookkeeping in play.
+        # A child pwsh proves the contract from a cold start, the way a user's script
+        # sees it -- including any lazy assembly load that only a first-touch hits.
+        $modulePath = Join-Path $PSScriptRoot '../module/adx.psd1'
+        $probe = @"
+`$ErrorActionPreference = 'Stop'
+try {
+    Import-Module '$modulePath' -Force
+    Remove-Module adx
+    if (Get-Module adx) { throw 'still loaded after Remove-Module' }
+    Import-Module '$modulePath' -Force
+    if (-not (Get-Module adx)) { throw 're-import produced no module' }
+} catch { Write-Output ('THREW: ' + `$_.Exception.Message.Split([char]10)[0]); exit 1 }
+Write-Output 'OK'
+"@
+        $result = pwsh -NoProfile -Command $probe
+        $result | Should -Contain 'OK'
+        $LASTEXITCODE | Should -Be 0
     }
 }
 

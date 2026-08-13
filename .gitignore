@@ -18,3 +18,6 @@ publish/
 
 # Private agent-runner harness (never ship).
 tests/scripts/
+
+# Pester NUnit output.
+tests/TestResults.xml
