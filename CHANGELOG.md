@@ -1,5 +1,67 @@
 # Changelog
 
+## 0.4.0
+
+### Fixed
+
+- Fixed Get-ADxDomainController metadata for cross-domain DCs. Domain now reflects the DC's actual config partition, IsReadOnly derives from the nTDSDSARO object class, and foreign FSMO roles return $null with a warning rather than an empty list. A DC whose home domain cannot be determined at all (missing serverReference) also gets $null Domain and roles with a warning, never the bound domain's confident values.
+
+### Changed
+
+- Identity-not-found errors on all cmdlets are now terminating errors, matching native RSAT behavior and allowing try/catch blocks to function as expected. Note that -ErrorAction SilentlyContinue no longer silences the miss — use try/catch for existence checks (see examples/12).
+- -SearchBase and -SearchScope now constrain identity resolution across all identity forms: an explicit -SearchBase or an explicitly narrowed -SearchScope routes distinguished-name and GUID identities through the scoped search instead of the base-read fast path (which is kept only for the unconstrained default, where it also reaches configuration/schema partitions).
+- Assemblies now stamp FileVersion and InformationalVersion from the manifest ModuleVersion on build, while AssemblyVersion remains pinned. The module loader now warns if a stale assembly version is already loaded in the session.
+- Documented the deliberate TimeSpan.MaxValue interval sentinel behavior in the README (preserving "never" values that RSAT collapses to 00:00:00).
+
+### Added
+
+- Added an OpenLDAP integration job to CI covering client binding, host:port parsing, wire paging, SizeLimit handling, connect timeouts, and cancellation against a live directory server.
+- Added macOS to the automated CI test matrix.
+- Updated README with documented divergences for identity scoping, foreign-DC attributes, interval sentinels, and msDS-UserPasswordExpiryTimeComputed DateTime conversion.
+
+## 0.3.4
+
+### Fixed
+
+- Fixed -Filter ignoring per-type attribute mappings. Filters on Get-ADxFineGrainedPasswordPolicy (e.g., Precedence, MinPasswordLength, ComplexityEnabled) and Get-ADxOrganizationalUnit (StreetAddress) now map to their correct underlying LDAP attributes instead of defaulting to domain-head or user attributes. (Interval-valued properties such as LockoutDuration remain unfilterable by design and now resolve to the correct loud refusal.)
+- Fixed provider-drive variables (such as $env:COMPUTERNAME) in -Filter throwing "not defined" errors.
+
+### Changed
+
+- Filtering on constructed attributes (tokenGroups, msDS-User-Account-Control-Computed, primaryGroupToken) is refused loudly with a redirect instead of emitting a filter AD never evaluates.
+
+## 0.3.3
+
+### Fixed
+
+- Fixed forced-binary attributes projecting as UTF-8 corrupted strings. tokenGroups now decodes to SIDs; thumbnailPhoto, jpegPhoto, and logonHours decode to byte arrays; and schemaIDGUID and attributeSecurityGUID decode to GUIDs.
+- Fixed tokenGroups (and primaryGroupToken) silently missing from search-path results: the DC computes these only for base-scope reads, so when explicitly requested via -Properties they are now filled in with a follow-up base read per entry — a search-resolved identity no longer projects a confidently empty group list.
+- Fixed msDS-User-Account-Control-Computed projecting as String instead of Int32.
+
+## 0.3.2
+
+### Fixed
+
+- Fixed ConnectTimeoutSeconds being ignored on Linux and macOS by adding a managed deadline to enforce the connect budget across all platforms. A timed-out connect is no longer retried (the budget was already spent; retries only stacked delays), and the bind worker runs on a dedicated thread so an abandoned bind against a dead or tar-pitted host cannot consume thread-pool workers.
+- Fixed Ctrl-C cancellation freezing during synchronous connection and bind calls by running the bind off the pipeline thread with active cancellation handling.
+- Fixed a connection leak in ConnectAsync when setup throws after creating a native connection.
+
+### Added
+
+- Added regression tests for the 0.3.0 Ctrl-C and object disposal race conditions.
+
+## 0.3.1
+
+### Fixed
+
+- Fixed server strings with embedded ports (e.g., -Server host:3268) bypassing Global Catalog result-shape safeguards, TLS rules, and diagnostics. The embedded port now drives the effective port, the TLS scheme, and the GC protections. Explicit port conflicts throw terminating errors, and IPv6 literals are properly parsed.
+- Fixed a mis-set USERDNSDOMAIN carrying an embedded ":port" silently choosing the port on the discovery path; it is now rejected with guidance (a DNS domain name cannot carry a port).
+- Fixed connection verbose log messages formatting duplicate ports (e.g., "host:3268:389").
+
+### Changed
+
+- Ports 636 and 3269 now imply LDAPS when -UseSsl is not explicitly bound, whether the port arrives via -Port or embedded in -Server (in 0.3.0 this attempted a plaintext bind against the LDAPS port and failed); an explicit -UseSsl:$false still wins.
+
 ## 0.3.0
 
 ### Fixed
@@ -9,7 +71,7 @@
 - Fixed SizeLimitExceeded partial page salvaging so it only applies when the caller explicitly sets a SizeLimit, preserving loud errors on server administrative limits.
 - Fixed an overflow crash when -ResultSetSize is set to [int]::MaxValue.
 - Fixed Get-ADxGroupNested emitting irrelevant primary-group warnings for excluded members.
-- Fixed a Ctrl-C cancellation race condition during disposal in LdapEntry.
+- Fixed a Ctrl-C cancellation race condition during cmdlet disposal (the cancellation token is cached at construction and StopProcessing tolerates losing the disposal race).
 
 ### Changed
 

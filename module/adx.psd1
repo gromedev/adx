@@ -1,6 +1,6 @@
 @{
     RootModule        = 'adx.psm1'
-    ModuleVersion     = '0.3.0'
+    ModuleVersion     = '0.4.0'
     GUID              = 'cd162d8a-384b-4915-9013-8d200fd7579e'
     Author            = 'Thomas Maillo Grome'
     CompanyName       = 'ADx'
@@ -47,6 +47,56 @@
             LicenseUri   = 'https://github.com/gromedev/adx/blob/main/LICENSE'
             ProjectUri   = 'https://github.com/gromedev/adx'
             ReleaseNotes = @'
+v0.4.0 - Identity resolution matches RSAT: the 18-agent review closes
+- BREAKING: an identity that does not exist now TERMINATES, as it does in RSAT, so
+  try/catch existence checks work. -ErrorAction SilentlyContinue no longer swallows the
+  miss -- use try/catch instead (examples/12 shows the pattern)
+- -SearchBase/-SearchScope constrain every identity form, DNs and GUIDs included: an
+  explicit scope routes them through the scoped search rather than the base-read fast
+  path, which stays the unconstrained default so it still reaches configuration and
+  schema partitions
+- Get-ADxDomainController tells the truth about foreign-domain DCs: their own Domain from
+  their config partition, RODC status from the nTDSDSARO class, and $null-with-warning
+  for roles it cannot read -- never the bound domain's confident values
+- Assemblies carry the release version; the loader warns on stale same-session loads
+- CI: OpenLDAP integration job (first real coverage of the LDAP client) and a macOS leg
+
+v0.3.4 - The filter resolves per type, and refuses what AD will not evaluate
+- -Filter now resolves per-type properties: FGPP filters (Precedence -eq 500,
+  MinPasswordLength -ge 14) and OU StreetAddress match instead of silently returning
+  nothing or throwing "not recognised"
+- Filters on constructed attributes (tokenGroups, msDS-User-Account-Control-Computed,
+  primaryGroupToken) are refused loudly with a redirect, instead of emitting a filter the
+  DC never evaluates and reporting the empty result as an answer
+- $env: and other provider-drive variables resolve in -Filter
+
+v0.3.3 - Projection fidelity: binary attributes and DC-computed reads
+- tokenGroups projects as SIDs on every identity and search path -- a follow-up base read
+  fills in what the DC computes only for base reads, so a search-resolved identity no
+  longer returns a confidently empty group list
+- No more UTF-8 mojibake: thumbnailPhoto/jpegPhoto/logonHours project as bytes,
+  schemaIDGUID/attributeSecurityGUID as GUIDs
+- msDS-User-Account-Control-Computed is Int32, not String
+
+v0.3.2 - The connect budget is real on every platform
+- ConnectTimeoutSeconds is enforced on Linux/macOS through a managed deadline (was:
+  whatever the OS connect timeout happened to be, 75-130s). A timed-out connect is no
+  longer retried -- the budget is already spent and retrying only stacked delay -- and the
+  bind runs on a dedicated thread, so an abandoned bind against a dead or tar-pitted host
+  cannot consume thread-pool workers
+- Ctrl-C interrupts an in-flight bind: the synchronous connect and bind no longer block
+  the pipeline thread
+- A connection leak when setup throws after the native connection already exists
+
+v0.3.1 - Server addressing: the port is parsed once and honoured everywhere
+- -Server host:3268 no longer sneaks past the Global Catalog safeguards: the embedded port
+  drives the effective port, the TLS scheme, and the GC result-shape protections. A
+  conflicting explicit -Port terminates, and IPv6 literals parse
+- Ports 636/3269 imply LDAPS unless -UseSsl is explicitly bound, however the port arrives
+  (in 0.3.0 this attempted a plaintext bind against the LDAPS port and failed)
+- A USERDNSDOMAIN carrying ":port" is rejected with guidance rather than silently choosing
+  the port on the discovery path
+
 v0.3.0 - Multi-domain truth and loud limits: the four-reviewer audit closes
 - Global Catalog binds no longer count other domains' primary-group members: a GC cannot
   resolve foreign RIDs, so the RID arms are dropped and a warning says what was excluded
