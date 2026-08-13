@@ -168,11 +168,16 @@ public static class AdTopology
     public static bool NtdsIsGlobalCatalog(int options) => (options & 0x1) != 0;
 
     /// <summary>
-    /// A domain controller's computer account carries userAccountControl bit 0x04000000
-    /// (PARTIAL_SECRETS_ACCOUNT) iff it is a read-only DC. This is the signal RSAT's
-    /// IsReadOnly reflects; primaryGroupID 521 vs 516 is the corroborating one.
+    /// A read-only DC's NTDS Settings object is class <c>nTDSDSARO</c>, a subclass of
+    /// <c>nTDSDSA</c> -- so it already appears in an (objectClass=nTDSDSA) enumeration, and
+    /// its class chain is the RODC signal. Preferred over the computer account's
+    /// PARTIAL_SECRETS_ACCOUNT UAC bit because the config partition is replicated
+    /// forest-wide: it answers correctly for a DC in ANY domain, where the computer-object
+    /// read fails behind a referral for foreign domains (and used to silently default the
+    /// flag to writable).
     /// </summary>
-    public static bool IsReadOnlyDcUac(int userAccountControl) => (userAccountControl & 0x04000000) != 0;
+    public static bool NtdsIsReadOnly(IReadOnlyList<string> objectClasses) =>
+        objectClasses.Any(c => c.Equals("nTDSDSARO", StringComparison.OrdinalIgnoreCase));
 
     /// <summary>
     /// A naming context DN's DNS name: the trailing <c>DC=</c> run joined with dots

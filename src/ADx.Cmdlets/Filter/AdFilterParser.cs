@@ -46,13 +46,19 @@ internal sealed class AdFilterParser
     private readonly Token[] _tokens;
     private readonly Func<string, (bool Found, object? Value)> _resolveVariable;
     private readonly bool _allowUnknownProperty;
+    private readonly IReadOnlyDictionary<string, string>? _attributeOverrides;
     private int _pos;
 
-    public AdFilterParser(Token[] tokens, Func<string, (bool Found, object? Value)> resolveVariable, bool allowUnknownProperty)
+    public AdFilterParser(
+        Token[] tokens,
+        Func<string, (bool Found, object? Value)> resolveVariable,
+        bool allowUnknownProperty,
+        IReadOnlyDictionary<string, string>? attributeOverrides = null)
     {
         _tokens = tokens;
         _resolveVariable = resolveVariable;
         _allowUnknownProperty = allowUnknownProperty;
+        _attributeOverrides = attributeOverrides;
     }
 
     public Token Current => _tokens[_pos];
@@ -415,10 +421,35 @@ internal sealed class AdFilterParser
                 "cannot reach (a security descriptor, a bind response, or DNS). Filter on the underlying " +
                 "attribute instead, or filter the results in PowerShell.");
 
+        // Constructed wire attributes: AD computes them per read and never evaluates them in
+        // a filter -- the comparison would succeed with zero rows, silently. Checked before
+        // the resolution tables so registering their SYNTAX (needed for projection) cannot
+        // quietly open a dead filter path.
+        if (AdSyntheticProperties.UnfilterableConstructedAttributes.TryGetValue(propertyText, out var redirect))
+            throw new AdFilterTranslationException(
+                $"'{propertyText}' is a constructed attribute: the DC computes it per read and does not evaluate " +
+                $"it in filters, so the comparison would successfully match nothing. Instead, {redirect}.");
+
         if (AdSyntheticProperties.IsKnownSyntheticProperty(propertyText))
             return BuildSyntheticComparison(propertyText, operatorId, rawValue);
 
-        var isKnownAttribute = AdAttributeSchema.TryResolveAttributeName(propertyText, out var ldapName);
+        // Per-type overrides win over the global tables -- the same precedence the projector
+        // applies. Without this, a PSO's MinPasswordLength resolves to the domain-head
+        // minPwdLength (absent on PSOs: silent zero rows) and an OU's StreetAddress to
+        // streetAddress where OUs store the value in street.
+        bool isKnownAttribute;
+        string? ldapName;
+        if (_attributeOverrides is not null &&
+            _attributeOverrides.TryGetValue(propertyText, out var overriddenName))
+        {
+            ldapName = overriddenName;
+            isKnownAttribute = true;
+        }
+        else
+        {
+            isKnownAttribute = AdAttributeSchema.TryResolveAttributeName(propertyText, out ldapName);
+        }
+
         if (!isKnownAttribute)
         {
             if (!_allowUnknownProperty)

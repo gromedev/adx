@@ -206,6 +206,13 @@ lookup - and verified to actually be a user, so a group DN is an ObjectNotFound 
 than a group object. Takes pipeline input by value and by a `DistinguishedName` property, so
 ADx output pipes back in.
 
+An identity that does not exist is a TERMINATING error (matching RSAT), so
+`try { Get-ADxUser $name } catch { }` is the existence-check idiom;
+`-ErrorAction SilentlyContinue` does not silence the miss. `-SearchBase` and an explicitly
+narrowed `-SearchScope` constrain identity resolution for every identity form, DNs and GUIDs
+included (an ADx extension - RSAT refuses the combination); only the unconstrained default
+keeps the base-read fast path, which also reaches configuration/schema-partition DNs.
+
 ```yaml
 Type: Object
 Parameter Sets: Identity
@@ -236,6 +243,9 @@ Accept wildcard characters: False
 
 ### -Port
 389 plain, 636 LDAPS, 3268/3269 Global Catalog. Defaults to 389, or 636 with `-UseSsl`.
+636 and 3269 imply LDAPS unless `-UseSsl:$false` is explicitly bound - a plaintext bind
+against an LDAPS port can never succeed. Conflicts with a port embedded in `-Server`
+(a terminating error names both).
 
 ```yaml
 Type: Int32
@@ -303,7 +313,9 @@ Accept wildcard characters: False
 ```
 
 ### -SearchBase
-Search root. Defaults to the domain's defaultNamingContext, read from RootDSE.
+Search root. Defaults to the domain's defaultNamingContext, read from RootDSE. Also
+constrains `-Identity` resolution: with a search base, every identity form (DNs and GUIDs
+included) resolves inside it.
 
 ```yaml
 Type: String
@@ -318,7 +330,9 @@ Accept wildcard characters: False
 ```
 
 ### -SearchScope
-`Base`, `OneLevel`, or `Subtree` (default).
+`Base`, `OneLevel`, or `Subtree` (default). Also constrains `-Identity` resolution: an
+explicitly narrowed scope routes DN and GUID identities through the scoped search instead
+of their base-read fast path.
 
 ```yaml
 Type: String
@@ -351,6 +365,10 @@ Accept wildcard characters: False
 
 ### -Server
 Domain controller or, preferably, the DNS domain name. Defaults to `USERDNSDOMAIN`.
+The RSAT `host:port` spelling is honoured: the embedded port drives the effective port
+(Global Catalog handling included) and 636/3269 imply LDAPS. Combining it with a
+conflicting `-Port` is a terminating error; malformed values (whitespace, bad ports,
+broken IPv6 brackets) are rejected loudly rather than passed to the native stack.
 
 ```yaml
 Type: String
@@ -365,7 +383,8 @@ Accept wildcard characters: False
 ```
 
 ### -UseSsl
-LDAPS. Changes the default port to 636.
+LDAPS. Changes the default port to 636. When not explicitly bound, an effective port of
+636/3269 (via `-Port` or `-Server host:port`) implies it; `-UseSsl:$false` always wins.
 
 ```yaml
 Type: SwitchParameter

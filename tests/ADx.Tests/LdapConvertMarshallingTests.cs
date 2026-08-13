@@ -283,8 +283,50 @@ public class LdapConvertMarshallingTests
     [InlineData("sIDHistory")]
     [InlineData("nTSecurityDescriptor")]
     [InlineData("tokenGroups")]
+    [InlineData("thumbnailPhoto")]
+    [InlineData("jpegPhoto")]
+    [InlineData("logonHours")]
+    [InlineData("schemaIDGUID")]
+    [InlineData("attributeSecurityGUID")]
+    [InlineData("userParameters")]
+    [InlineData("msDS-KeyCredentialLink")]
     public void ForcedBinarySet_ContainsTheAttributesThatCorruptAsStrings(string attribute)
     {
         Assert.Contains(attribute, ADxLdapClient.BinaryAttributes);
+    }
+
+    [Fact]
+    public void ForcedBinarySet_EveryMemberHasNonStringSyntax_OrIsADocumentedTextException()
+    {
+        // The inverse invariant of ForcedBinarySet_CoversEverySchemaBinaryDeclaration: an
+        // attribute the client forces to byte[] but the schema still calls String is
+        // UTF-8-decoded by both projectors -- mojibake for genuinely binary values. That
+        // drift shipped once (thumbnailPhoto and friends projected U+FFFD soup in 0.3.0).
+        // The two exemptions are text-on-wire attributes forced to byte[] only for
+        // transport robustness; their UTF-8 round-trip IS the correct projection.
+        var textOnWire = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "userParameters", "msDS-KeyCredentialLink"
+        };
+
+        foreach (var name in ADxLdapClient.BinaryAttributes)
+        {
+            if (textOnWire.Contains(name)) continue;
+            Assert.NotEqual(AdAttributeSyntax.String, AdAttributeSchema.SyntaxOf(name));
+        }
+    }
+
+    [Theory]
+    [InlineData("tokenGroups", AdAttributeSyntax.Sid)]
+    [InlineData("thumbnailPhoto", AdAttributeSyntax.Binary)]
+    [InlineData("jpegPhoto", AdAttributeSyntax.Binary)]
+    [InlineData("logonHours", AdAttributeSyntax.Binary)]
+    [InlineData("schemaIDGUID", AdAttributeSyntax.Guid)]
+    [InlineData("attributeSecurityGUID", AdAttributeSyntax.Guid)]
+    [InlineData("msDS-User-Account-Control-Computed", AdAttributeSyntax.Integer)]
+    public void SyntaxOf_ByteValuedAndComputedAttributes_AreRegistered(
+        string attribute, AdAttributeSyntax expected)
+    {
+        Assert.Equal(expected, AdAttributeSchema.SyntaxOf(attribute));
     }
 }

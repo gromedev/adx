@@ -61,6 +61,25 @@ public static class AdSyntheticProperties
             "PrincipalsAllowedToDelegateToAccount", "PrincipalsAllowedToRetrieveManagedPassword",
         };
 
+    /// <summary>
+    /// Constructed attributes the DC computes per read and refuses to evaluate in a filter.
+    /// A comparison against them is structurally valid LDAP that matches nothing -- success
+    /// code, zero rows, silently -- which is exactly the failure class the loud refusals
+    /// exist to prevent. Keyed by LDAP name; the value is the actionable redirect for the
+    /// error message. Distinct from <see cref="UnsupportedForFiltering"/> (RSAT display-name
+    /// synthetics): these are real wire attributes that project fine but cannot filter.
+    /// </summary>
+    public static readonly IReadOnlyDictionary<string, string> UnfilterableConstructedAttributes =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["tokenGroups"] =
+                "filter on memberOf (with -RecursiveMatch for nesting) and read tokenGroups from the resolved objects",
+            ["msDS-User-Account-Control-Computed"] =
+                "use Search-ADxAccount's switches (-LockedOut, -PasswordExpired), which evaluate it client-side",
+            ["primaryGroupToken"] =
+                "filter member objects on primaryGroupID instead",
+        };
+
     /// <summary>Takes $true/$false: the UAC-bit properties plus LockedOut.</summary>
     public static bool IsBooleanSynthetic(string name) =>
         UacBooleans.ContainsKey(name) || name.Equals("LockedOut", StringComparison.OrdinalIgnoreCase);

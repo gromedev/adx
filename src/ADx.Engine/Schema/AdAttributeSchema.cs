@@ -96,6 +96,10 @@ public static class AdAttributeSchema
             // Integer: plain numeric attributes, including bit-packed flag fields whose
             // decoding into named booleans is the projector's job, not the schema's.
             ["userAccountControl"] = AdAttributeSyntax.Integer,
+            // Constructed (server-computed) sibling of userAccountControl: same 2.5.5.9
+            // integer syntax, so it must project as Int32 like RSAT emits -- without this
+            // entry it fell to the String default and projected the raw wire text.
+            ["msDS-User-Account-Control-Computed"] = AdAttributeSyntax.Integer,
             ["groupType"] = AdAttributeSyntax.Integer,
             ["primaryGroupID"] = AdAttributeSyntax.Integer,
             ["primaryGroupToken"] = AdAttributeSyntax.Integer,
@@ -137,10 +141,14 @@ public static class AdAttributeSchema
             // SDDL codec rather than the Windows-only SecurityIdentifier.
             ["objectSid"] = AdAttributeSyntax.Sid,
             ["sIDHistory"] = AdAttributeSyntax.Sid,
+            // Constructed: the account's full expanded group SIDs. Multi-valued by nature.
+            ["tokenGroups"] = AdAttributeSyntax.Sid,
 
             // Guid: binary objectGUID, in .NET's native Guid byte order.
             ["objectGUID"] = AdAttributeSyntax.Guid,
             ["invocationId"] = AdAttributeSyntax.Guid,
+            ["schemaIDGUID"] = AdAttributeSyntax.Guid,
+            ["attributeSecurityGUID"] = AdAttributeSyntax.Guid,
 
             // Dn: values that are themselves distinguished names, not free text.
             ["distinguishedName"] = AdAttributeSyntax.Dn,
@@ -164,6 +172,10 @@ public static class AdAttributeSchema
             // The gMSA password-retrieval ACL: a security descriptor, surfaced raw as bytes;
             // its friendly name PrincipalsAllowedToRetrieveManagedPassword is declared unsupported.
             ["msDS-GroupMSAMembership"] = AdAttributeSyntax.Binary,
+            ["thumbnailPhoto"] = AdAttributeSyntax.Binary,
+            ["jpegPhoto"] = AdAttributeSyntax.Binary,
+            // 21-byte week bitmap, one bit per hour; RSAT emits the raw bytes.
+            ["logonHours"] = AdAttributeSyntax.Binary,
         };
 
     /// <summary>

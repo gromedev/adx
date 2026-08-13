@@ -244,13 +244,17 @@ public class AdTopologyTests
     }
 
     [Theory]
-    [InlineData(0x04000000, true)]  // PARTIAL_SECRETS_ACCOUNT -> RODC
-    [InlineData(0x04001000, true)]  // among SERVER_TRUST_ACCOUNT etc.
-    [InlineData(0x00001000, false)] // plain writable DC (SERVER_TRUST_ACCOUNT)
-    [InlineData(0x00000000, false)]
-    public void IsReadOnlyDcUac_TestsBit0x04000000(int uac, bool expected)
+    // 0.4: the RODC signal moved from the computer account's UAC bit to the NTDS Settings
+    // object class -- nTDSDSARO is forest-replicated config data, so it answers correctly
+    // for foreign-domain DCs where the computer read fails behind a referral (and used to
+    // silently default to writable).
+    [InlineData(new[] { "top", "applicationSettings", "nTDSDSA", "nTDSDSARO" }, true)]
+    [InlineData(new[] { "top", "applicationSettings", "nTDSDSA" }, false)]
+    [InlineData(new[] { "ntdsdsaro" }, true)] // case-insensitive, as LDAP class names are
+    [InlineData(new string[0], false)]
+    public void NtdsIsReadOnly_TestsTheObjectClassChain(string[] classes, bool expected)
     {
-        Assert.Equal(expected, AdTopology.IsReadOnlyDcUac(uac));
+        Assert.Equal(expected, AdTopology.NtdsIsReadOnly(classes));
     }
 
     // ---- Config-partition DN geometry ----

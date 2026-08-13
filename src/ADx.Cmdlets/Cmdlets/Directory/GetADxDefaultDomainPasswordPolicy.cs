@@ -11,8 +11,10 @@ namespace ADx.Cmdlets.Cmdlets.Directory;
 /// No <c>-Identity</c>/<c>-Current</c>: RSAT's domain targeting rides the netlogon DC
 /// locator, which is not LDAP -- here the connected domain (chosen via <c>-Server</c>) IS
 /// the target, which is the drop-in case. The four age/duration values are interval
-/// attributes (stored as negative 100ns ticks); they surface as positive TimeSpans exactly
-/// as RSAT emits them, via <see cref="LdapConvert.Interval(long)"/>.
+/// attributes (stored as negative 100ns ticks); they surface as positive TimeSpans via
+/// <see cref="LdapConvert.Interval(long)"/>. One deliberate divergence, documented in the
+/// README: the stored 0 ("none") stays 00:00:00 and the never sentinel surfaces as
+/// TimeSpan.MaxValue -- distinguishable, where RSAT collapses both to 00:00:00.
 /// </para>
 /// </summary>
 [Cmdlet(VerbsCommon.Get, "ADxDefaultDomainPasswordPolicy")]

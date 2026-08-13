@@ -17,8 +17,12 @@ $tier0 = @(
 )
 
 $findings = foreach ($groupName in $tier0) {
-    $group = Get-ADxGroup $groupName -ErrorAction SilentlyContinue
-    if (-not $group) { continue }
+    # 0.4: identity-not-found is a TERMINATING error, matching RSAT -- try/catch is the
+    # existence-check idiom. (-ErrorAction SilentlyContinue no longer silences the miss;
+    # forest-root groups like Enterprise/Schema Admins are legitimately absent from child
+    # domains, so a miss here is expected, not an error.)
+    try { $group = Get-ADxGroup $groupName }
+    catch { continue }
 
     foreach ($member in Get-ADxGroupMember $group -Recursive -Properties EmailAddress, LastLogonDate, Enabled) {
         [PSCustomObject]@{

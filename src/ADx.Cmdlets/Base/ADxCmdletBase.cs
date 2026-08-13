@@ -20,7 +20,9 @@ public abstract class ADxCmdletBase : ADxCmdletCore
 
     /// <summary>
     /// Domain controller or, preferably, the full DNS domain name. Defaults to
-    /// <c>USERDNSDOMAIN</c>.
+    /// <c>USERDNSDOMAIN</c>. The RSAT "host:port" spelling is honoured -- the embedded port
+    /// drives the effective port (and the Global Catalog handling with it); combining it
+    /// with a conflicting -Port is an error.
     /// </summary>
     [Parameter]
     [Alias("DomainController", "DC")]
@@ -58,9 +60,22 @@ public abstract class ADxCmdletBase : ADxCmdletCore
     public SwitchParameter ChaseReferrals { get; set; }
 
     /// <summary>
-    /// The port this cmdlet will actually connect on, resolving the -Port / -UseSsl defaults.
+    /// -Server with any embedded ":port" split off -- the RSAT-documented spelling
+    /// ("dc01.contoso.com:3268"), which the native LDAP stacks honour over the separate port
+    /// number. Parsed once; malformed values surface in <see cref="ValidateEndpoint"/>.
     /// </summary>
-    protected int EffectivePort => Port > 0 ? Port : (UseSsl.IsPresent ? 636 : 389);
+    private (string? Host, int? Port) ParsedServer =>
+        _parsedServer ??= LdapServerAddress.Parse(Server);
+
+    private (string? Host, int? Port)? _parsedServer;
+
+    /// <summary>
+    /// The port this cmdlet will actually connect on: -Port, else the port embedded in
+    /// -Server, else the -UseSsl default. Every port-keyed decision (the Global Catalog
+    /// safeguards above all) reads THIS, never the raw parameter -- "-Server host:3268" used
+    /// to bind the GC while the safeguards still believed it was a domain bind.
+    /// </summary>
+    protected int EffectivePort => Port > 0 ? Port : ParsedServer.Port ?? (UseSsl.IsPresent ? 636 : 389);
 
     /// <summary>
     /// True when bound to a Global Catalog (3268/3269). A GC answers a subtree search from the
@@ -70,11 +85,48 @@ public abstract class ADxCmdletBase : ADxCmdletCore
     /// </summary>
     protected bool IsGlobalCatalog => EffectivePort is 3268 or 3269;
 
+    /// <summary>
+    /// -UseSsl when the caller said so either way; otherwise inferred from the resolved port.
+    /// 636/3269 are the LDAPS ports -- a plaintext bind against them can never succeed, so
+    /// "-Server host:636" without the switch previously produced a scheme/port mismatch that
+    /// failed as an unrelated-looking connection error.
+    /// </summary>
+    private bool EffectiveUseSsl => MyInvocation.BoundParameters.ContainsKey(nameof(UseSsl))
+        ? UseSsl.IsPresent
+        : EffectivePort is 636 or 3269;
+
+    /// <summary>
+    /// Terminating validation of the -Server / -Port combination, ahead of the first
+    /// connection: an ambiguous or malformed endpoint must not reach the connect path,
+    /// because every downstream safeguard keys on the resolved port.
+    /// </summary>
+    private void ValidateEndpoint()
+    {
+        (string? Host, int? Port) parsed;
+        try
+        {
+            parsed = ParsedServer;
+        }
+        catch (ArgumentException ex)
+        {
+            ThrowTerminatingError(new ErrorRecord(
+                ex, "InvalidServerValue", ErrorCategory.InvalidArgument, Server));
+            return;
+        }
+
+        if (parsed.Port is int embedded && Port > 0 && embedded != Port)
+            ThrowTerminatingError(new ErrorRecord(
+                new ArgumentException(
+                    $"-Server '{Server}' embeds port {embedded}, but -Port {Port} was also given. " +
+                    "Pass the port one way or the other."),
+                "ServerPortConflict", ErrorCategory.InvalidArgument, Server));
+    }
+
     protected LdapClientOptions BuildOptions() => new()
     {
-        Server = Server,
-        Port = Port > 0 ? Port : (UseSsl.IsPresent ? 636 : 389),
-        UseSsl = UseSsl.IsPresent,
+        Server = ParsedServer.Host,
+        Port = EffectivePort,
+        UseSsl = EffectiveUseSsl,
         AuthMode = Enum.TryParse<LdapAuthMode>(AuthType, ignoreCase: true, out var mode)
             ? mode
             : LdapAuthMode.Negotiate,
@@ -90,6 +142,8 @@ public abstract class ADxCmdletBase : ADxCmdletCore
     protected ADxLdapClient GetConnection()
     {
         if (_client is not null) return _client;
+
+        ValidateEndpoint();
 
         try
         {

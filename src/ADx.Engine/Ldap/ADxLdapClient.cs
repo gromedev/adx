@@ -24,12 +24,15 @@ public sealed class ADxLdapClient : ILdapSearchExecutor
     // Attributes AD returns as raw bytes. S.DS.Protocols surfaces values as strings when
     // they decode as UTF-8, which silently corrupts binary data, so these are forced.
     // Seeded from the schema's Sid/Guid/Binary declarations so a new binary attribute only
-    // needs declaring once, plus the byte-valued attributes the schema has no entry for.
+    // needs declaring once. The two extras are text-on-wire (userParameters is a Unicode
+    // string that tools stuff padding bytes into; msDS-KeyCredentialLink is DN-Binary,
+    // "B:828:...:CN=..." text) -- forced to byte[] here for transport robustness, but their
+    // schema syntax stays String because the UTF-8 round-trip is the correct projection and
+    // RSAT emits them as strings. Anything else byte-valued belongs in the schema table.
     internal static readonly HashSet<string> BinaryAttributes = new(
         AdAttributeSchema.BinaryTransferAttributes.Concat(new[]
         {
-            "tokenGroups", "thumbnailPhoto", "jpegPhoto", "msDS-KeyCredentialLink",
-            "userParameters", "logonHours", "schemaIDGUID", "attributeSecurityGUID"
+            "userParameters", "msDS-KeyCredentialLink"
         }),
         StringComparer.OrdinalIgnoreCase);
 
@@ -72,12 +75,37 @@ public sealed class ADxLdapClient : ILdapSearchExecutor
                 "with USERDNSDOMAIN set.");
         }
 
-        verbose?.Invoke($"Connecting to LDAP server '{server}:{options.Port}' (SSL: {options.UseSsl}).");
+        // The cmdlet layer normalizes "host:port" before options are built, but this client
+        // is public API: an embedded port in a direct caller's server string would override
+        // options.Port inside the native stack (both wldap32 and the OpenLDAP URI builder
+        // prefer it), silently desynchronizing every decision keyed on options.Port. Resolve
+        // it here so the identifier, the diagnostics and the caller's port always agree.
+        var port = options.Port;
+        var originalServer = server;
+        var (embeddedHost, embeddedPort) = LdapServerAddress.Parse(server);
+        if (embeddedPort is not null)
+        {
+            // A DISCOVERED value (USERDNSDOMAIN) is a DNS domain name and never legitimately
+            // carries ':port' -- honouring one would let a mis-set environment variable pick
+            // the port (a GC port included) with no caller intent at all. Loud, not clever.
+            if (string.IsNullOrWhiteSpace(options.Server))
+                throw new InvalidOperationException(
+                    $"USERDNSDOMAIN is '{originalServer}', which embeds a port. A DNS domain name cannot " +
+                    "carry ':port'; fix the environment variable, or pass -Server (and -Port) explicitly.");
+
+            server = embeddedHost!;
+            if (embeddedPort.Value != options.Port)
+                verbose?.Invoke(
+                    $"Server '{originalServer}' embeds port {embeddedPort.Value}; it overrides the configured port {options.Port}.");
+            port = embeddedPort.Value;
+        }
+
+        verbose?.Invoke($"Connecting to LDAP server '{server}:{port}' (SSL: {options.UseSsl}).");
 
         LdapConnection connection;
         try
         {
-            var identifier = new LdapDirectoryIdentifier(server, options.Port);
+            var identifier = new LdapDirectoryIdentifier(server, port);
             connection = new LdapConnection(identifier)
             {
                 AuthType = MapAuthType(options.AuthMode),
@@ -88,7 +116,14 @@ public sealed class ADxLdapClient : ILdapSearchExecutor
                 // search timeout regardless.
                 Timeout = TimeSpan.FromSeconds(options.ConnectTimeoutSeconds)
             };
+        }
+        catch (Exception ex) when (IsMissingLdapRuntime(ex))
+        {
+            throw LdapRuntimeMissing(ex);
+        }
 
+        try
+        {
             connection.SessionOptions.ProtocolVersion = 3;
             connection.SessionOptions.ReferralChasing = options.ChaseReferrals
                 ? ReferralChasingOptions.All
@@ -114,12 +149,17 @@ public sealed class ADxLdapClient : ILdapSearchExecutor
 
             WarnOnUnprotectedTransport(options, warning);
         }
-        catch (Exception ex) when (ex is DllNotFoundException or TypeInitializationException or EntryPointNotFoundException)
+        catch (Exception ex) when (IsMissingLdapRuntime(ex))
         {
-            throw new LdapRuntimeMissingException(
-                "The OpenLDAP client library could not be loaded. Install it and retry " +
-                "(Debian/Ubuntu: 'apt install libldap-2.5-0'; RHEL/Fedora: 'dnf install openldap').",
-                ex);
+            connection.Dispose();
+            throw LdapRuntimeMissing(ex);
+        }
+        catch
+        {
+            // Session-option setup failing after the connection object exists must not leak
+            // the native handle.
+            connection.Dispose();
+            throw;
         }
 
         var client = new ADxLdapClient(connection, options, server);
@@ -165,6 +205,14 @@ public sealed class ADxLdapClient : ILdapSearchExecutor
         _ => AuthType.Negotiate
     };
 
+    private static bool IsMissingLdapRuntime(Exception ex) =>
+        ex is DllNotFoundException or TypeInitializationException or EntryPointNotFoundException;
+
+    private static LdapRuntimeMissingException LdapRuntimeMissing(Exception ex) => new(
+        "The OpenLDAP client library could not be loaded. Install it and retry " +
+        "(Debian/Ubuntu: 'apt install libldap-2.5-0'; RHEL/Fedora: 'dnf install openldap').",
+        ex);
+
     /// <summary>
     /// Warn when credentials will cross the wire without confidentiality.
     /// <para>
@@ -206,10 +254,7 @@ public sealed class ADxLdapClient : ILdapSearchExecutor
             cancellationToken.ThrowIfCancellationRequested();
             try
             {
-                if (_options.Credential is not null)
-                    _connection.Bind(_options.Credential);
-                else
-                    _connection.Bind();
+                await BindOnceAsync(cancellationToken).ConfigureAwait(false);
 
                 if (attempt > 0) verbose?.Invoke($"Bind succeeded on attempt {attempt + 1}.");
                 return;
@@ -241,7 +286,7 @@ public sealed class ADxLdapClient : ILdapSearchExecutor
                     "with 'kinit user@REALM' and omit -Credential so the existing ticket is used.",
                     ex);
             }
-            catch (LdapException ex) when (attempt < _options.MaxRetryAttempts && IsRetryable(ex))
+            catch (LdapException ex) when (attempt < _options.MaxRetryAttempts && IsRetryable(ex) && !_bindAbandoned)
             {
                 attempt++;
                 warning?.Invoke(
@@ -251,6 +296,111 @@ public sealed class ADxLdapClient : ILdapSearchExecutor
                     .ConfigureAwait(false);
             }
         }
+    }
+
+    /// <summary>
+    /// One bind attempt that Ctrl-C and the connect budget can actually interrupt -- from
+    /// the CALLER's point of view. S.DS.Protocols has no asynchronous bind
+    /// (BeginSendRequest+Abort is the search path's designed cancellation; bind got no
+    /// equivalent), so the synchronous <c>Bind</c> runs on a dedicated worker thread and the
+    /// caller awaits it under <c>WaitAsync</c>: cancellation and the managed deadline both
+    /// complete the await immediately, regardless of what the worker is doing.
+    /// <para>
+    /// What happens to the WORKER is messier, and the mechanism matters: disposing the
+    /// connection does NOT unblock an in-flight native call. The P/Invoke holds the
+    /// SafeHandle for the call's duration, so <c>ldap_unbind</c> is deferred until the
+    /// native call returns on its own -- measured: Dispose returns in 0ms while the worker
+    /// stays blocked. Disposal helps only when it wins the race BEFORE the worker enters
+    /// native code (Bind then fail-fasts with ObjectDisposedException) and by preventing any
+    /// reuse afterwards. An abandoned worker therefore blocks until the OS connect timeout
+    /// (~75s macOS / ~130s Linux against a SYN black hole) -- or INDEFINITELY against an
+    /// endpoint that accepts TCP and never answers the bind (tarpit, half-dead DC), which
+    /// no timeout in this stack bounds. That is why the worker runs LongRunning (its own
+    /// thread): a stuck native call must not eat a thread-pool worker, and a DC sweep over
+    /// dead hosts must not starve the pool one abandoned bind at a time.
+    /// </para>
+    /// </summary>
+    private async Task BindOnceAsync(CancellationToken cancellationToken)
+    {
+        // Registered before the worker starts. This does NOT reach into an in-flight native
+        // call (see the doc above): it fail-fasts a worker that has not yet entered native
+        // code, and marks the handle so the connection cannot be reused after cancel.
+        using var abortRegistration = cancellationToken.Register(static state =>
+        {
+            try { ((LdapConnection)state!).Dispose(); }
+            catch { /* teardown of an abandoned connection is best-effort */ }
+        }, _connection);
+
+        // LongRunning: a dedicated thread, not a pool worker -- an abandoned bind may stay
+        // blocked in native code for minutes (or forever, on a tarpit endpoint).
+        var bindTask = Task.Factory.StartNew(() =>
+        {
+            if (_options.Credential is not null)
+                _connection.Bind(_options.Credential);
+            else
+                _connection.Bind();
+        }, CancellationToken.None, TaskCreationOptions.LongRunning | TaskCreationOptions.DenyChildAttach,
+            TaskScheduler.Default);
+
+        try
+        {
+            // The managed deadline is load-bearing, not belt-and-braces: LdapConnection.Timeout
+            // bounds the lazy TCP connect only under wldap32. libldap leaves the connect to the
+            // OS (measured: 75s on macOS, ~130s on Linux against a SYN-black-holed host), so
+            // without this WaitAsync the configured ConnectTimeoutSeconds was consumed,
+            // documented, and ineffective on the platforms this module exists for.
+            await bindTask
+                .WaitAsync(TimeSpan.FromSeconds(_options.ConnectTimeoutSeconds), cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (TimeoutException)
+        {
+            AbandonBind(bindTask);
+            throw new LdapException(
+                LdapResultCodes.Timeout,
+                $"The LDAP server did not answer the connect/bind within {_options.ConnectTimeoutSeconds}s " +
+                "(ConnectTimeoutSeconds).");
+        }
+        catch (OperationCanceledException)
+        {
+            AbandonBind(bindTask);
+            throw;
+        }
+        catch (Exception) when (cancellationToken.IsCancellationRequested)
+        {
+            // The disposal-induced failure won the race against WaitAsync noticing the
+            // token: same situation, same answer.
+            throw new OperationCanceledException(cancellationToken);
+        }
+    }
+
+    // Set when a bind was abandoned (timeout or cancel): the connection has been disposed --
+    // which does NOT unblock a worker already inside the native call (see BindOnceAsync),
+    // but does make the connection permanently unusable, so the retry ladder must not run
+    // another attempt over it. Retrying a slow-connect timeout only stacks delays anyway;
+    // fast failures (refused, busy, unavailable) never take the abandon path and keep their
+    // retries.
+    private volatile bool _bindAbandoned;
+
+    /// <summary>
+    /// Give up on an in-flight bind worker. Disposing the connection here cannot interrupt
+    /// the native call (the SafeHandle defers teardown until it returns -- see
+    /// <see cref="BindOnceAsync"/>); it fail-fasts a worker that has not yet entered native
+    /// code and guarantees no reuse. The continuation observes the worker's eventual fault
+    /// so an abandoned bind -- which may fault minutes later -- can never surface as an
+    /// unobserved task exception.
+    /// </summary>
+    private void AbandonBind(Task bindTask)
+    {
+        _bindAbandoned = true;
+        try { _connection.Dispose(); }
+        catch { /* teardown of an abandoned connection is best-effort */ }
+
+        _ = bindTask.ContinueWith(
+            static t => _ = t.Exception,
+            CancellationToken.None,
+            TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
     }
 
     /// <summary>
@@ -269,14 +419,18 @@ public sealed class ADxLdapClient : ILdapSearchExecutor
     /// <summary>
     /// Transient conditions worth retrying. Credential and access-rights failures are
     /// deliberately excluded: they fail identically every time, so retrying only delays
-    /// the error the operator needs to see.
+    /// the error the operator needs to see. Timeout (85) is excluded too, deliberately:
+    /// a timed-out connect means the full ConnectTimeoutSeconds budget was already spent,
+    /// so retries only stack delays -- and on Windows the NATIVE connect timer (same
+    /// duration as the managed deadline) can fire first, which would otherwise slip a
+    /// timeout past the abandoned-bind gate and loop the ladder. Excluding the code makes
+    /// the no-retry-on-timeout outcome hold whichever timer wins.
     /// </summary>
     private static bool IsRetryable(LdapException ex) => ex.ErrorCode switch
     {
         LdapResultCodes.Busy => true,
         LdapResultCodes.Unavailable => true,
         LdapResultCodes.ServerDown => true,
-        LdapResultCodes.Timeout => true,
         _ => false
     };
 

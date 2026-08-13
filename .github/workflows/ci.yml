@@ -21,8 +21,12 @@ jobs:
       fail-fast: false
       matrix:
         # Linux proves the cross-platform claim; Windows exercises the native
-        # integrated-auth / signing paths that only compile-guard off Windows.
-        os: [ ubuntu-latest, windows-latest ]
+        # integrated-auth / signing paths that only compile-guard off Windows. macOS is
+        # advertised (psd1 tags, README) and its one CI-checkable risk is real: the module
+        # borrows System.DirectoryServices.Protocols from pwsh's app base, and a servicing
+        # change there fails at Import-Module with a green build -- the Pester gate's
+        # Import-Module is exactly that check.
+        os: [ ubuntu-latest, windows-latest, macos-latest ]
 
     steps:
       - uses: actions/checkout@v4
@@ -66,4 +70,116 @@ jobs:
         with:
           name: pester-results-${{ matrix.os }}
           path: tests/TestResults.xml
+          if-no-files-found: ignore
+
+  integration:
+    # The one gate that reaches ADxLdapClient itself: its S.DS.Protocols response types have
+    # internal-only constructors, so the offline fakes stop one layer above it. slapd is not
+    # AD -- this covers transport behavior (bind, paging, the SizeLimit-salvage gate's both
+    # branches, connect timeout, bind cancellation); AD semantics stay in the live-lab suite.
+    name: integration (openldap)
+    runs-on: ubuntu-latest
+    services:
+      openldap:
+        # bitnamilegacy is where Bitnami froze its containers in the 2025 catalog
+        # restructuring; frozen is fine for a pinned test fixture (bitnami/openldap tags
+        # no longer resolve at all).
+        image: bitnamilegacy/openldap:2.6
+        ports:
+          - 1389:1389
+        env:
+          LDAP_ROOT: dc=example,dc=org
+          LDAP_ADMIN_USERNAME: admin
+          LDAP_ADMIN_PASSWORD: adminpassword
+          # cn=config access is what lets the seed step lower the server size limit.
+          LDAP_CONFIG_ADMIN_ENABLED: "yes"
+          LDAP_CONFIG_ADMIN_PASSWORD: configpassword
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up .NET 9 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Build module
+        shell: pwsh
+        run: ./build.ps1 -Configuration Release
+
+      - name: Generate the integrity fixture (deterministic, with manifest)
+        shell: pwsh
+        run: ./tests/fixtures/New-AdxFixture.ps1 -OutputDir ./tests/fixtures/out -Format Ldif
+
+      - name: Seed directory and lower the server size limit
+        run: |
+          sudo apt-get update -q && sudo apt-get install -y -q ldap-utils
+
+          for i in $(seq 1 30); do
+            if ldapwhoami -H ldap://localhost:1389 -D cn=admin,dc=example,dc=org -w adminpassword > /dev/null 2>&1; then
+              break
+            fi
+            sleep 2
+          done
+          ldapwhoami -H ldap://localhost:1389 -D cn=admin,dc=example,dc=org -w adminpassword
+
+          # The ~19k-entry integrity fixture outgrows LMDB's default 10MB map; raise it
+          # before seeding.
+          ldapmodify -H ldap://localhost:1389 -D cn=admin,cn=config -w configpassword <<'EOF'
+          dn: olcDatabase={2}mdb,cn=config
+          changetype: modify
+          replace: olcDbMaxSize
+          olcDbMaxSize: 209715200
+          EOF
+
+          # Completeness ground truth: every entry in fixture.ldif is named in
+          # manifest.json, and the integration suite reconciles the two as sets.
+          ldapadd -H ldap://localhost:1389 -D cn=admin,dc=example,dc=org -w adminpassword \
+            -f tests/fixtures/out/fixture.ldif > /dev/null
+          echo "fixture seeded: $(grep -c '^dn:' tests/fixtures/out/fixture.ldif) entries"
+
+          # 25 people (enumeration counts assert exactly this), plus a plain reader bind:
+          # OpenLDAP exempts the rootdn from every limit, so the size-limit tests are only
+          # meaningful under a non-rootdn identity.
+          {
+            printf 'dn: ou=people,dc=example,dc=org\nobjectClass: organizationalUnit\nou: people\n\n'
+            for i in $(seq -w 1 25); do
+              printf 'dn: cn=person%s,ou=people,dc=example,dc=org\nobjectClass: inetOrgPerson\ncn: person%s\nsn: Person %s\n\n' "$i" "$i" "$i"
+            done
+            printf 'dn: cn=reader,dc=example,dc=org\nobjectClass: person\nobjectClass: uidObject\nuid: reader\ncn: reader\nsn: reader\nuserPassword: readerpassword\n\n'
+          } | ldapadd -H ldap://localhost:1389 -D cn=admin,dc=example,dc=org -w adminpassword
+
+          # The server-enforced-limit branch of the salvage gate needs a limit smaller than
+          # the seeded set. Global, but the rootdn stays exempt.
+          ldapmodify -H ldap://localhost:1389 -D cn=admin,cn=config -w configpassword <<'EOF'
+          dn: cn=config
+          changetype: modify
+          replace: olcSizeLimit
+          olcSizeLimit: 10
+          EOF
+
+      - name: Integration tests (Pester)
+        shell: pwsh
+        env:
+          ADX_INTEGRATION: '1'
+        run: |
+          if (-not (Get-Module -ListAvailable Pester | Where-Object { $_.Version -ge [version]'5.0' })) {
+            Set-PSRepository PSGallery -InstallationPolicy Trusted
+            Install-Module Pester -MinimumVersion 5.0 -Force -SkipPublisherCheck -Scope CurrentUser
+          }
+          Import-Module ./tests/TestHarness.psm1
+          $result = Invoke-TestHarness -TestPath ./tests/ADx.Integration.Tests.ps1 -TestResultsFile ./tests/IntegrationResults.xml
+          if ($result.FailedCount -gt 0) {
+            throw "$($result.FailedCount) integration test(s) failed."
+          }
+          if ($result.PassedCount -eq 0) {
+            throw "The integration suite passed 0 tests - the self-skip gate engaged in CI, which defeats the job."
+          }
+
+      - name: Upload integration results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pester-results-integration
+          path: tests/IntegrationResults.xml
           if-no-files-found: ignore

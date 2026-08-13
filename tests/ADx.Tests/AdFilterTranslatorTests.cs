@@ -706,4 +706,126 @@ public class AdFilterTranslatorTests
         var defaultNode = AdFilterTranslator.Translate("default -eq 'a'", NoVariables, allowUnknownProperty: true);
         Assert.Equal("(default=a)", AdFilterEmitter.Emit(defaultNode!));
     }
+
+    // ---- 0.4: per-schema AttributeOverrides in -Filter ----
+    //
+    // The real schema dictionaries are used, not copies: the point is that -Filter and the
+    // projector resolve a property THROUGH THE SAME MAPPING. Before 0.4 the filter path
+    // ignored overrides entirely: a PSO's MinPasswordLength emitted the domain-head
+    // minPwdLength (absent on PSOs -- silent zero rows) and Precedence threw "not recognised".
+
+    private static string TFgpp(string filter) =>
+        AdFilterEmitter.Emit(AdFilterTranslator.Translate(
+            filter, NoVariables,
+            attributeOverrides: AdObjectSchema.FineGrainedPasswordPolicy.AttributeOverrides)!);
+
+    [Theory]
+    // Integer-valued overrides: Microsoft's own doc example is Precedence -eq 500.
+    [InlineData("Precedence -eq 500", "(msDS-PasswordSettingsPrecedence=500)")]
+    [InlineData("MinPasswordLength -ge 14", "(msDS-MinimumPasswordLength>=14)")]
+    [InlineData("PasswordHistoryCount -eq 24", "(msDS-PasswordHistoryLength=24)")]
+    [InlineData("LockoutThreshold -le 5", "(msDS-LockoutThreshold<=5)")]
+    // Boolean-valued overrides.
+    [InlineData("ComplexityEnabled -eq $true", "(msDS-PasswordComplexityEnabled=TRUE)")]
+    [InlineData("ReversibleEncryptionEnabled -eq $false", "(msDS-PasswordReversibleEncryptionEnabled=FALSE)")]
+    // Dn-valued override.
+    [InlineData("AppliesTo -eq 'CN=Tier0,OU=Groups,DC=corp,DC=com'",
+        "(msDS-PSOAppliesTo=CN=Tier0,OU=Groups,DC=corp,DC=com)")]
+    public void FgppOverrides_ResolveToTheMsDsAttributes(string filter, string expected)
+    {
+        Assert.Equal(expected, TFgpp(filter));
+    }
+
+    [Theory]
+    // Interval-valued overrides: durations are deliberately unfilterable, but the error must
+    // be the loud interval refusal naming the property -- resolved through the override --
+    // not "not recognised" and never the pre-0.4 silent zero rows via the domain-head name.
+    [InlineData("MinPasswordAge -ge 1")]
+    [InlineData("MaxPasswordAge -le 90")]
+    [InlineData("LockoutDuration -eq 30")]
+    [InlineData("LockoutObservationWindow -eq 30")]
+    public void FgppIntervalOverrides_ThrowTheIntervalRefusal(string filter)
+    {
+        var ex = Assert.Throws<AdFilterTranslationException>(() =>
+            AdFilterTranslator.Translate(filter, NoVariables,
+                attributeOverrides: AdObjectSchema.FineGrainedPasswordPolicy.AttributeOverrides));
+
+        Assert.Contains("interval-valued", ex.Message);
+        Assert.DoesNotContain("not a recognised", ex.Message);
+    }
+
+    [Fact]
+    public void FgppOverrides_CoverEveryEntryInTheSchema()
+    {
+        // Every override name must resolve through the filter path without "not recognised":
+        // a new override added to the schema without filter-side coverage is the 0.3.0 bug
+        // reappearing for that property. Interval-valued targets throw the (correct) interval
+        // refusal instead of emitting; both outcomes prove the override was consulted.
+        foreach (var (name, target) in AdObjectSchema.FineGrainedPasswordPolicy.AttributeOverrides!)
+        {
+            object? value = AdAttributeSchema.SyntaxOf(target) switch
+            {
+                AdAttributeSyntax.Integer => 5,
+                AdAttributeSyntax.Boolean => true,
+                _ => "x"
+            };
+
+            try
+            {
+                var node = AdFilterTranslator.Translate(
+                    $"{name} -eq $value",
+                    Vars(("value", value)),
+                    attributeOverrides: AdObjectSchema.FineGrainedPasswordPolicy.AttributeOverrides);
+                Assert.Contains($"({target}=", AdFilterEmitter.Emit(node!));
+            }
+            catch (AdFilterTranslationException ex)
+            {
+                Assert.Contains("interval-valued", ex.Message);
+            }
+        }
+    }
+
+    [Fact]
+    public void OuStreetAddress_ResolvesToStreet_NotStreetAddress()
+    {
+        // OUs store the street in 'street'; users in 'streetAddress'. The global table's
+        // answer matched nothing on an OU, silently.
+        var node = AdFilterTranslator.Translate(
+            "StreetAddress -like '*Main*'", NoVariables,
+            attributeOverrides: AdObjectSchema.OrganizationalUnit.AttributeOverrides);
+        Assert.Equal("(street=*Main*)", AdFilterEmitter.Emit(node!));
+    }
+
+    [Theory]
+    // Constructed wire attributes: registering their syntax (0.4, for projection) must not
+    // open a filter path AD will never evaluate -- the comparison would match nothing with
+    // a success code. The refusal is unconditional: these names are KNOWN, so
+    // -AllowUnknownProperty is not an escape hatch, same as the synthetic refusals.
+    [InlineData("tokenGroups -eq 'S-1-5-21-1-2-3-513'")]
+    [InlineData("tokenGroups -ne $null")]
+    [InlineData("(tokenGroups -eq 'S-1-5-21-1-2-3-513')")]
+    [InlineData("msDS-User-Account-Control-Computed -band 8388608")]
+    [InlineData("msDS-User-Account-Control-Computed -eq 0")]
+    [InlineData("primaryGroupToken -eq 513")]
+    public void ConstructedAttributes_AreRefusedInFilters_WithARedirect(string filter)
+    {
+        var ex = Assert.Throws<AdFilterTranslationException>(() =>
+            AdFilterTranslator.Translate(filter, NoVariables, allowUnknownProperty: true));
+
+        Assert.Contains("constructed attribute", ex.Message);
+        Assert.Contains("Instead,", ex.Message);
+    }
+
+    [Fact]
+    public void WithoutOverrides_TheGlobalTablesStillGovern()
+    {
+        // On schemas without an override (Get-ADxUser and the domain-head policy), the
+        // pre-0.4 resolutions are unchanged -- overrides are additive per type, not global.
+        Assert.Equal("(minPwdLength>=14)", T("MinPasswordLength -ge 14"));
+        Assert.Equal("(streetAddress=*Main*)", T("StreetAddress -like '*Main*'"));
+
+        var ex = Assert.Throws<AdFilterTranslationException>(() =>
+            AdFilterTranslator.Translate("Precedence -eq 500", NoVariables));
+        Assert.Contains("not a recognised", ex.Message);
+    }
 }

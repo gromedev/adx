@@ -460,6 +460,132 @@ public class AdRsatProjectorTests
         Assert.Equal("S-1-5-21-1-2-3-1013", sid.Value);
     }
 
+    // ---- 0.4: byte-valued attributes the schema previously had no syntax for ----
+
+    [Fact]
+    public void FetchAll_ThumbnailPhoto_StaysBytes()
+    {
+        // The no-escape-hatch corruption path: -Properties * projects every returned
+        // attribute, and before 0.4 a photo's bytes fell to the String default and came
+        // back as U+FFFD soup. JPEG magic bytes are deliberately not valid UTF-8.
+        var photo = new byte[] { 0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46 };
+        var user = Entry("CN=Pic,DC=corp,DC=com",
+            ("objectClass", new object[] { "top", "person", "organizationalPerson", "user" }),
+            ("thumbnailPhoto", new object[] { photo }));
+
+        var projected = Assert.IsType<byte[]>(
+            Value(ProjectUser(user, new[] { "*" }, fetchAll: true), "thumbnailPhoto"));
+
+        Assert.Equal(photo, projected);
+    }
+
+    [Fact]
+    public void TokenGroups_ProjectsAsSidArray_EvenWhenSingle()
+    {
+        // Constructed expanded-membership list: inherently a set, so a lone Domain Users
+        // SID must stay an array for scripts that index and Count it.
+        var user = Entry("CN=Member,DC=corp,DC=com",
+            ("objectClass", new object[] { "top", "person", "organizationalPerson", "user" }),
+            ("tokenGroups", new object[] { LdapConvert.SddlToSid("S-1-5-21-1-2-3-513")! }));
+
+        var groups = Assert.IsType<ADxSecurityIdentifier?[]>(
+            Value(ProjectUser(user, new[] { "tokenGroups" }), "tokenGroups"));
+
+        Assert.Single(groups);
+        Assert.Equal("S-1-5-21-1-2-3-513", groups[0]!.Value);
+    }
+
+    [Fact]
+    public void ComputedUserAccountControl_ProjectsAsInt32()
+    {
+        // Same 2.5.5.9 syntax as userAccountControl; RSAT emits Int32, and before 0.4 the
+        // missing table entry made it project as the raw wire string.
+        var user = Entry("CN=Locked,DC=corp,DC=com",
+            ("objectClass", new object[] { "top", "person", "organizationalPerson", "user" }),
+            ("msDS-User-Account-Control-Computed", new object[] { "8388608" }));
+
+        Assert.Equal(8388608,
+            Value(ProjectUser(user, new[] { "msDS-User-Account-Control-Computed" }), "msDS-User-Account-Control-Computed"));
+    }
+
+    // ---- 0.4: base-scope-only constructed attribute completion (the tokenGroups fix) ----
+
+    [Fact]
+    public void WantedConstructedAttributes_NamesWhatIsRequestedButAbsent()
+    {
+        var searchEntry = Entry("CN=U,DC=corp,DC=com",
+            ("objectClass", new object[] { "top", "person", "organizationalPerson", "user" }));
+
+        // Requested + absent: the follow-up read must fetch it.
+        Assert.Equal(new[] { "tokenGroups" },
+            ADxObjectCmdletBase.WantedConstructedAttributes(
+                searchEntry, new[] { "distinguishedName", "tokenGroups" }));
+
+        // Not requested: never fetched -- -Properties * (fetch list "*") stays untouched,
+        // matching RSAT where * omits constructed attributes.
+        Assert.Empty(ADxObjectCmdletBase.WantedConstructedAttributes(searchEntry, new[] { "*" }));
+        Assert.Empty(ADxObjectCmdletBase.WantedConstructedAttributes(
+            searchEntry, new[] { "distinguishedName" }));
+
+        // Already carried (the DN fast path's base read returned it): no second read.
+        var baseReadEntry = Entry("CN=U,DC=corp,DC=com",
+            ("tokenGroups", new object[] { LdapConvert.SddlToSid("S-1-5-21-1-2-3-513")! }));
+        Assert.Empty(ADxObjectCmdletBase.WantedConstructedAttributes(
+            baseReadEntry, new[] { "tokenGroups" }));
+    }
+
+    [Fact]
+    public void MergeConstructedAttributes_OverlaysTheFollowUpValues()
+    {
+        var searchEntry = Entry("CN=U,DC=corp,DC=com",
+            ("objectClass", new object[] { "top", "person", "organizationalPerson", "user" }),
+            ("sAMAccountName", new object[] { "u1" }));
+        var followUp = Entry("CN=U,DC=corp,DC=com",
+            ("tokenGroups", new object[]
+            {
+                LdapConvert.SddlToSid("S-1-5-21-1-2-3-513")!,
+                LdapConvert.SddlToSid("S-1-5-21-1-2-3-1104")!,
+            }));
+
+        var merged = ADxObjectCmdletBase.MergeConstructedAttributes(
+            searchEntry, followUp, new[] { "tokenGroups" });
+
+        Assert.Equal(2, merged.Attributes["tokenGroups"].Count);
+        Assert.Equal("u1", merged.GetString("sAMAccountName")); // originals preserved
+
+        // The merged entry projects real SIDs -- the confidently-empty array is gone.
+        var groups = Assert.IsType<ADxSecurityIdentifier?[]>(
+            Value(AdRsatProjector.Project(merged, AdObjectSchema.User, new[] { "tokenGroups" }, false),
+                "tokenGroups"));
+        Assert.Equal(2, groups.Length);
+    }
+
+    [Fact]
+    public void MergeConstructedAttributes_FailedOrEmptyFollowUp_LeavesTheEntryUntouched()
+    {
+        var searchEntry = Entry("CN=U,DC=corp,DC=com",
+            ("objectClass", new object[] { "top", "person", "organizationalPerson", "user" }));
+
+        // Absent stays absent: never a fabricated value.
+        Assert.Same(searchEntry, ADxObjectCmdletBase.MergeConstructedAttributes(
+            searchEntry, null, new[] { "tokenGroups" }));
+        Assert.Same(searchEntry, ADxObjectCmdletBase.MergeConstructedAttributes(
+            searchEntry, Entry("CN=U,DC=corp,DC=com"), new[] { "tokenGroups" }));
+    }
+
+    [Fact]
+    public void UserParameters_TextOnWire_StaysString()
+    {
+        // The transport forces userParameters to byte[] for robustness, but it is a Unicode
+        // string attribute: the UTF-8 round-trip is the correct projection, not mojibake.
+        var user = Entry("CN=TS,DC=corp,DC=com",
+            ("objectClass", new object[] { "top", "person", "organizationalPerson", "user" }),
+            ("userParameters", new object[] { "CtxCfgPresent"u8.ToArray() }));
+
+        Assert.Equal("CtxCfgPresent",
+            Value(ProjectUser(user, new[] { "userParameters" }), "userParameters"));
+    }
+
     // ---- 0.2.6: organizational units ----
 
     private static LdapEntry TypicalOu() => Entry(

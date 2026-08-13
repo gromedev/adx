@@ -133,10 +133,12 @@ public abstract class ADxTopologyCmdletBase : ADxCmdletBase
 
     /// <summary>
     /// A domain controller, joined across its three defining objects: the config-partition
-    /// nTDSDSA (GC flag, invocation id), its parent server object (hostname, site,
-    /// serverReference), and the domain-partition computer account (OS, RODC flag). The
-    /// computer-account fields are null for a DC in another domain whose partition this bind
-    /// cannot read -- honest absence, never a guessed value.
+    /// nTDSDSA (GC flag, RODC flag, invocation id), its parent server object (hostname, site,
+    /// serverReference), and the domain-partition computer account (OS). The computer-account
+    /// fields are null for a DC in another domain whose partition this bind cannot read --
+    /// honest absence, never a guessed value. IsReadOnly deliberately does NOT come from the
+    /// computer account: the nTDSDSARO class check answers from forest-replicated config data,
+    /// so it stays correct where the computer read fails.
     /// </summary>
     protected sealed record DomainControllerFacts(
         string? HostName,
@@ -159,7 +161,7 @@ public abstract class ADxTopologyCmdletBase : ADxCmdletBase
     protected IReadOnlyList<DomainControllerFacts> CollectDomainControllerFacts()
     {
         var ntdsList = SearchConfig("CN=Sites", "(objectClass=nTDSDSA)", LdapScope.Subtree,
-            "options", "invocationId");
+            "options", "invocationId", "objectClass");
 
         var servers = SearchConfig("CN=Sites", "(objectClass=server)", LdapScope.Subtree,
             "dNSHostName", "serverReference");
@@ -177,17 +179,13 @@ public abstract class ADxTopologyCmdletBase : ADxCmdletBase
             var computerDn = server?.GetString("serverReference");
 
             string? operatingSystem = null;
-            var isReadOnly = false;
             if (!string.IsNullOrWhiteSpace(computerDn))
             {
                 // Best-effort: a foreign-domain DC's computer object is in a partition this
                 // bind may not host, so a referral here must not abort the enumeration.
-                var computer = TryReadEntry(computerDn!, "userAccountControl", "operatingSystem");
+                var computer = TryReadEntry(computerDn!, "operatingSystem");
                 if (computer is not null)
-                {
                     operatingSystem = computer.GetString("operatingSystem");
-                    isReadOnly = AdTopology.IsReadOnlyDcUac(computer.GetInt32("userAccountControl") ?? 0);
-                }
             }
 
             facts.Add(new DomainControllerFacts(
@@ -198,7 +196,7 @@ public abstract class ADxTopologyCmdletBase : ADxCmdletBase
                 ComputerDn: computerDn,
                 DomainNamingContext: LdapConvert.DomainNamingContext(computerDn),
                 IsGlobalCatalog: isGc,
-                IsReadOnly: isReadOnly,
+                IsReadOnly: AdTopology.NtdsIsReadOnly(ntds.GetStrings("objectClass")),
                 InvocationId: LdapConvert.ObjectGuid(ntds.GetBytes("invocationId")),
                 OperatingSystem: operatingSystem));
         }

@@ -41,7 +41,8 @@ public sealed class GetADxPrincipalGroupMembership : ADxMembershipQueryCmdletBas
             var principal = ResolvePrincipal();
             if (principal is null)
             {
-                WriteError(new ErrorRecord(
+                // Terminating, matching RSAT -- see the ADxObjectCmdletBase not-found site.
+                ThrowTerminatingError(new ErrorRecord(
                     new ItemNotFoundException($"Cannot find a principal with identity '{Identity}'."),
                     "ADxObjectNotFound", ErrorCategory.ObjectNotFound, Identity));
                 return;

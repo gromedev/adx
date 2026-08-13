@@ -146,13 +146,20 @@ internal static class AdIdentityResolver
     }
 
     /// <summary>
-    /// The LDAP filter for a non-DN identity lookup (DN identities skip search entirely via
-    /// a base-scope read). Composed with the schema's base filter by the caller.
+    /// The LDAP filter for an identity lookup. DN identities normally skip search entirely
+    /// via a base-scope read at the DN itself; the DistinguishedName case here serves the
+    /// scoped path (-SearchBase given), where an equality filter inside the requested subtree
+    /// is what makes DN identities honour the same scope every other identity kind does.
+    /// Composed with the schema's base filter by the caller.
     /// </summary>
     public static AdFilterNode BuildLookupFilter(AdIdentityKind kind, object value)
     {
         switch (kind)
         {
+            case AdIdentityKind.DistinguishedName:
+                return new AdFilterEquality("distinguishedName",
+                    LdapAssertionValue.Exact((string)value));
+
             case AdIdentityKind.ObjectGuid:
                 return new AdFilterEquality("objectGUID",
                     LdapAssertionValue.Binary(((Guid)value).ToByteArray()));

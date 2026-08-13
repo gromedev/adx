@@ -143,7 +143,7 @@ public abstract class ADxObjectCmdletBase : ADxCmdletBase
             ResolveEffectiveSearchBase(),
             ldapFilter,
             fetchList,
-            Enum.TryParse<LdapScope>(SearchScope, ignoreCase: true, out var scope) ? scope : LdapScope.Subtree,
+            EffectiveSearchScope,
             effectivePageSize,
             SizeLimit: 0);
 
@@ -173,7 +173,8 @@ public abstract class ADxObjectCmdletBase : ADxCmdletBase
                     break;
                 }
                 WriteObject(AdRsatProjector.Project(
-                    CompleteRangedAttributes(enumerator.Current), ObjectSchema, Properties, fetchAll));
+                    CompleteConstructedAttributes(CompleteRangedAttributes(enumerator.Current), fetchList),
+                    ObjectSchema, Properties, fetchAll));
                 emitted++;
                 if (emitted % 500 == 0) DrainMessages();
             }
@@ -194,19 +195,36 @@ public abstract class ADxObjectCmdletBase : ADxCmdletBase
 
     private string TranslateFilter()
     {
-        // SessionState.PSVariable.Get, NOT GetVariableValue: the latter returns null for both
-        // "undefined" and "defined as $null", which would make a typo'd variable silently
-        // filter as $null. The translator turns not-found into a terminating error.
         var node = AdFilterTranslator.Translate(
             Filter,
-            name =>
-            {
-                var variable = SessionState.PSVariable.Get(name);
-                return variable is null ? (false, null) : (true, variable.Value);
-            },
-            AllowUnknownProperty.IsPresent);
+            name => ResolveFilterVariable(SessionState, name),
+            AllowUnknownProperty.IsPresent,
+            ObjectSchema.AttributeOverrides);
 
         return ComposeWithBaseFilter(node);
+    }
+
+    private static readonly object UndefinedVariableSentinel = new();
+
+    /// <summary>
+    /// -Filter variable resolution. <c>PSVariable.Get</c> first, NOT <c>GetValue</c>: the
+    /// latter returns null for both "undefined" and "defined as $null", which would make a
+    /// typo'd variable silently filter as $null. But Get alone never sees provider drives --
+    /// <c>$env:COMPUTERNAME</c> (any drive-qualified path) came back null even though the
+    /// value plainly exists, and RSAT filters using it failed as "not defined". So a Get miss
+    /// retries through GetValue with a sentinel default: the sentinel back means genuinely
+    /// unresolvable (the translator's loud not-defined error stands); anything else, null
+    /// included, is a real value from a provider drive.
+    /// </summary>
+    internal static (bool Found, object? Value) ResolveFilterVariable(SessionState session, string name)
+    {
+        var variable = session.PSVariable.Get(name);
+        if (variable is not null) return (true, variable.Value);
+
+        var fromProvider = session.PSVariable.GetValue(name, UndefinedVariableSentinel);
+        return ReferenceEquals(fromProvider, UndefinedVariableSentinel)
+            ? (false, null)
+            : (true, fromProvider);
     }
 
     /// <summary>
@@ -247,6 +265,15 @@ public abstract class ADxObjectCmdletBase : ADxCmdletBase
         return ResolveSearchBase(SearchBase);
     }
 
+    /// <summary>
+    /// -SearchScope, parsed once. Both the -Filter search and identity resolution honour it
+    /// -- every identity form: a narrowed scope also disables the DN/GUID fast paths (see
+    /// the dispatch in ProcessIdentity), because a base read at the identity's own DN would
+    /// return an object the requested scope excludes.
+    /// </summary>
+    private LdapScope EffectiveSearchScope =>
+        Enum.TryParse<LdapScope>(SearchScope, ignoreCase: true, out var scope) ? scope : LdapScope.Subtree;
+
     // ---- -Identity ----
 
     private void ProcessIdentity()
@@ -257,31 +284,49 @@ public abstract class ADxObjectCmdletBase : ADxCmdletBase
         var fetchList = AdRsatProjector.BuildFetchList(
             ObjectSchema, Properties, AllowUnknownProperty.IsPresent, out var fetchAll);
 
+        // The fast paths (base/extended-DN reads, which also reach configuration and schema
+        // partitions) are correct only when the caller did not constrain the search: an
+        // explicit -SearchBase OR an explicitly narrowed -SearchScope must route through the
+        // scoped search, or the read escapes the requested scope -- piped objects bind
+        // -Identity by DN, so a scope-filtered audit silently lost its scoping while the
+        // same audit over sAMAccountNames scoped correctly. IsNullOrWhiteSpace, not null:
+        // -SearchBase "" must mean "not given" in BOTH this gate and
+        // ResolveEffectiveSearchBase, or the two disagree and a DN quietly resolves against
+        // defaultNamingContext. Subtree (the default) keeps the fast path: its semantics are
+        // identical whether the scope was defaulted or spelled out.
+        var unconstrained = string.IsNullOrWhiteSpace(SearchBase) &&
+                            EffectiveSearchScope == LdapScope.Subtree;
+
         var entry = kind switch
         {
-            AdIdentityKind.DistinguishedName => ResolveByDn((string)value, fetchList),
-            // No explicit -SearchBase: resolve through AD's <GUID=...> extended-DN read,
-            // which the server answers from ANY partition it holds (configuration and
-            // schema included) -- how RSAT resolves GUIDs. The defaultNamingContext
-            // subtree search cannot see those partitions; it remains the fallback, and
-            // the scoped path when the caller DID pass -SearchBase.
-            AdIdentityKind.ObjectGuid when SearchBase is null =>
+            AdIdentityKind.DistinguishedName when unconstrained =>
+                ResolveByDn((string)value, fetchList),
+            // The <GUID=...> extended-DN read is how RSAT resolves GUIDs; the
+            // defaultNamingContext subtree search cannot see other partitions, so it stays
+            // the fallback and the constrained path.
+            AdIdentityKind.ObjectGuid when unconstrained =>
                 ResolveByGuidBind((Guid)value, fetchList) ?? ResolveBySearch(kind, value, fetchList),
             _ => ResolveBySearch(kind, value, fetchList)
         };
 
         if (entry is null)
         {
-            WriteError(new ErrorRecord(
+            // Terminating, matching RSAT: try/catch existence checks ported from RSAT rely
+            // on the miss being catchable. WriteError under the default preference is not
+            // caught, so `try { Get-ADxUser x } catch { ... }` took the wrong branch --
+            // while the sibling ambiguity check below already terminated. Same decision at
+            // every ADxObjectNotFound site; the module must not be inconsistent about it.
+            ThrowTerminatingError(new ErrorRecord(
                 new ItemNotFoundException(
                     $"Cannot find a {ObjectSchema.TypeLabel} with identity '{Identity}'" +
-                    (SearchBase is null ? "." : $" under '{SearchBase}'.")),
+                    (string.IsNullOrWhiteSpace(SearchBase) ? "." : $" under '{SearchBase}'.")),
                 "ADxObjectNotFound", ErrorCategory.ObjectNotFound, Identity));
             return;
         }
 
         var projected = AdRsatProjector.Project(
-            CompleteRangedAttributes(entry), ObjectSchema, Properties, fetchAll);
+            CompleteConstructedAttributes(CompleteRangedAttributes(entry), fetchList),
+            ObjectSchema, Properties, fetchAll);
         DrainMessages();
         WriteObject(projected);
     }
@@ -297,6 +342,72 @@ public abstract class ADxObjectCmdletBase : ADxCmdletBase
             ? LdapRangeRetriever.CompleteAsync(GetConnection(), entry, CancellationToken, EnqueueWarning)
                 .GetAwaiter().GetResult()
             : entry;
+
+    // [MS-ADTS] base-scope-only constructed attributes: the DC computes these only for a
+    // baseObject search and silently omits them from onelevel/subtree results.
+    internal static readonly string[] BaseScopeOnlyConstructedAttributes = { "tokenGroups", "primaryGroupToken" };
+
+    /// <summary>
+    /// Fill in explicitly-requested base-scope-only constructed attributes on an entry that
+    /// came out of a SEARCH. The DC returns tokenGroups/primaryGroupToken only for a base
+    /// read, so a search-path entry silently lacks them -- and would project a
+    /// confidently-EMPTY value for the one attribute class where an empty answer reads as
+    /// "no effective access". One extra base read per entry, only when the caller named the
+    /// attribute (never for -Properties *, where constructed attributes stay absent,
+    /// matching RSAT). The DN fast path already reads base-scope and needs no follow-up:
+    /// the already-carried check makes this a no-op there.
+    /// </summary>
+    private LdapEntry CompleteConstructedAttributes(LdapEntry entry, IReadOnlyList<string> fetchList)
+    {
+        var wanted = WantedConstructedAttributes(entry, fetchList);
+        if (wanted.Count == 0) return entry;
+
+        var read = GetConnection()
+            .ReadEntryAsync(entry.DistinguishedName, wanted, CancellationToken)
+            .GetAwaiter().GetResult();
+        DrainMessages();
+
+        return MergeConstructedAttributes(entry, read, wanted);
+    }
+
+    /// <summary>The requested base-scope-only attributes the entry does not already carry.</summary>
+    internal static IReadOnlyList<string> WantedConstructedAttributes(
+        LdapEntry entry, IReadOnlyList<string> fetchList)
+    {
+        List<string>? wanted = null;
+        foreach (var name in BaseScopeOnlyConstructedAttributes)
+        {
+            if (fetchList.Contains(name, StringComparer.OrdinalIgnoreCase) &&
+                !entry.Attributes.ContainsKey(name))
+                (wanted ??= new List<string>()).Add(name);
+        }
+        return (IReadOnlyList<string>?)wanted ?? Array.Empty<string>();
+    }
+
+    /// <summary>
+    /// Overlay the follow-up read's constructed values onto the search entry. A failed or
+    /// empty follow-up leaves the entry untouched: absent stays absent (projects null/empty
+    /// per the attribute's own rules), never a fabricated value.
+    /// </summary>
+    internal static LdapEntry MergeConstructedAttributes(
+        LdapEntry entry, LdapEntry? read, IReadOnlyList<string> wanted)
+    {
+        if (read is null) return entry;
+
+        Dictionary<string, IReadOnlyList<object>>? merged = null;
+        foreach (var name in wanted)
+        {
+            if (!read.Attributes.TryGetValue(name, out var values)) continue;
+            if (merged is null)
+            {
+                merged = new Dictionary<string, IReadOnlyList<object>>(StringComparer.OrdinalIgnoreCase);
+                foreach (var kv in entry.Attributes) merged[kv.Key] = kv.Value;
+            }
+            merged[name] = values;
+        }
+
+        return merged is null ? entry : new LdapEntry(entry.DistinguishedName, merged);
+    }
 
     /// <summary>
     /// The DN fast path: a base-scope read, one round trip, no paging, no subtree walk --
@@ -372,7 +483,7 @@ public abstract class ADxObjectCmdletBase : ADxCmdletBase
             ResolveEffectiveSearchBase(),
             ComposeWithBaseFilter(lookup),
             EnsureObjectClassFetched(fetchList),
-            LdapScope.Subtree,
+            EffectiveSearchScope,
             // Two, so ambiguity is detectable: one row cannot distinguish "the match" from
             // "a match".
             PageSize: 2,

@@ -6,6 +6,9 @@
     <Nullable>enable</Nullable>
     <RootNamespace>ADx.Cmdlets</RootNamespace>
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+    <!-- Pinned deliberately - see the ADx.Engine.csproj comment. The release identity is
+         FileVersion/InformationalVersion, stamped by Directory.Build.props from adx.psd1. -->
+    <AssemblyVersion>1.0.0.0</AssemblyVersion>
     <!-- See ADx.Engine.csproj: CA1416 keeps Windows-only APIs out of the cross-platform
          code paths at build time rather than at a customer's runtime. -->
     <WarningsAsErrors>$(WarningsAsErrors);CA1416</WarningsAsErrors>

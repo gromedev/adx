@@ -49,6 +49,9 @@ internal static class AdRsatProjector
         // it -- an array here rendered as "System.String[]" where RSAT shows the text.
         "memberOf", "member", "servicePrincipalName", "proxyAddresses", "sIDHistory",
         "userCertificate",
+        // Constructed expanded-group-SID list: inherently a set, and single membership
+        // (Domain Users only) is exactly when scripts still Count it.
+        "tokenGroups",
         // A PSO's AppliesTo and a service account's HostComputers are multi-valued DN lists that
         // scripts index and Count, so a single value must not collapse to a scalar.
         "msDS-PSOAppliesTo", "msDS-HostServiceAccountBL",

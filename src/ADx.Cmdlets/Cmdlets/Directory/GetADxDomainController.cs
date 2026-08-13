@@ -62,7 +62,6 @@ public sealed class GetADxDomainController : ADxTopologyCmdletBase
 
             var rootDse = GetConnection().RootDse;
             var domainNc = rootDse.DefaultNamingContext;
-            var domainDns = AdTopology.DnsNameFromNamingContext(domainNc);
             var forestDns = AdTopology.DnsNameFromNamingContext(rootDse.RootDomainNamingContext);
             var roleHolders = ReadForestAndDomainRoleHolders(rootDse, domainNc);
 
@@ -88,7 +87,8 @@ public sealed class GetADxDomainController : ADxTopologyCmdletBase
             {
                 if (ParameterSetName == IdentitySet && !string.IsNullOrWhiteSpace(Identity))
                 {
-                    WriteError(new ErrorRecord(
+                    // Terminating, matching RSAT -- see the ADxObjectCmdletBase not-found site.
+                    ThrowTerminatingError(new ErrorRecord(
                         new ItemNotFoundException($"No domain controller matches identity '{Identity}'."),
                         "ADxDomainControllerNotFound", ErrorCategory.ObjectNotFound, Identity));
                 }
@@ -96,7 +96,7 @@ public sealed class GetADxDomainController : ADxTopologyCmdletBase
             }
 
             foreach (var fact in results.OrderBy(f => f.HostName, StringComparer.OrdinalIgnoreCase))
-                WriteObject(Project(fact, roleHolders, domainDns, forestDns));
+                WriteObject(Project(fact, roleHolders, domainNc, forestDns));
         }
         catch (OperationCanceledException) when (CancellationToken.IsCancellationRequested)
         {
@@ -111,22 +111,60 @@ public sealed class GetADxDomainController : ADxTopologyCmdletBase
 
     private PSObject Project(
         DomainControllerFacts fact, IReadOnlyList<(string Role, string? Holder)> roleHolders,
-        string? domainDns, string? forestDns)
+        string? connectedDomainNc, string? forestDns)
     {
         var pso = new PSObject();
         pso.TypeNames.Insert(0, "ADx.DomainController");
 
         void Add(string name, object? value) => pso.Properties.Add(new PSNoteProperty(name, value));
 
+        // Three honesty tiers. LOCAL (DomainNamingContext known and equal to the bound
+        // domain's): the role holders were read from this bind, emit them confidently.
+        // FOREIGN (known and different): its PDC/RID/Infrastructure role objects live in ITS
+        // domain partition, unreadable here -- RSAT errors on foreign -Identity; ADx returns
+        // the DC with per-DC-honest values instead (a deliberate, documented divergence),
+        // which means roles must be $null-with-a-warning, never a confident empty array that
+        // reads as "holds no roles". UNKNOWN (DomainNamingContext null -- the server object
+        // has no serverReference, a real damaged-metadata condition): treat like foreign,
+        // never like local -- a DC whose home domain cannot even be determined must not get
+        // the bound domain's confident role list.
+        var isLocal = fact.DomainNamingContext is not null && connectedDomainNc is not null &&
+            string.Equals(fact.DomainNamingContext, connectedDomainNc, StringComparison.OrdinalIgnoreCase);
+
         Add("Name", LdapConvert.FirstRdnValue(fact.ServerDn));
         Add("HostName", fact.HostName);
         Add("Site", fact.Site);
-        Add("Domain", domainDns);
+        // Per-DC, from the config-partition serverReference -- a child-domain DC used to be
+        // stamped with the BOUND domain's name here. Null when serverReference is missing:
+        // honest absence.
+        Add("Domain", AdTopology.DnsNameFromNamingContext(fact.DomainNamingContext));
         Add("Forest", forestDns);
         Add("IsGlobalCatalog", fact.IsGlobalCatalog);
         Add("IsReadOnly", fact.IsReadOnly);
         Add("OperatingSystem", fact.OperatingSystem);
-        Add("OperationMasterRoles", OperationMasterRolesFor(fact.HostName, roleHolders));
+
+        if (isLocal)
+        {
+            Add("OperationMasterRoles", OperationMasterRolesFor(fact.HostName, roleHolders));
+        }
+        else if (fact.DomainNamingContext is null)
+        {
+            WriteWarning(
+                $"'{fact.HostName ?? fact.ServerDn}' has no serverReference on its config-partition server " +
+                "object, so its home domain cannot be determined (damaged replication metadata?). Domain and " +
+                "OperationMasterRoles are $null rather than guessed values.");
+            Add("OperationMasterRoles", null);
+        }
+        else
+        {
+            var dcDomain = AdTopology.DnsNameFromNamingContext(fact.DomainNamingContext);
+            WriteWarning(
+                $"'{fact.HostName ?? fact.ServerDn}' is in domain '{dcDomain}', whose operations-master role " +
+                "objects this bind cannot read. OperationMasterRoles is $null rather than a partial list; " +
+                $"bind -Server {dcDomain} to read its roles.");
+            Add("OperationMasterRoles", null);
+        }
+
         Add("InvocationId", fact.InvocationId);
         Add("NTDSSettingsObjectDN", fact.NtdsSettingsDn);
         Add("ServerObjectDN", fact.ServerDn);

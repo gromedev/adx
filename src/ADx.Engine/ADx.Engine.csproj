@@ -5,6 +5,14 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <RootNamespace>ADx.Engine</RootNamespace>
+    <!-- Pinned DELIBERATELY across releases. Assemblies cannot unload from the Default ALC,
+         and a re-import under a NEW assembly identity fails with FileLoadException; under the
+         SAME identity it silently binds to the already-loaded copy. The pin chooses the
+         bindable behavior, and the release identity lives in FileVersion/InformationalVersion
+         instead (stamped by Directory.Build.props from adx.psd1) so the psm1 loader can detect and warn
+         about a stale same-session load - impossible when every build reads 1.0.0.0
+         everywhere. Do not "fix" this to track the module version. -->
+    <AssemblyVersion>1.0.0.0</AssemblyVersion>
     <!-- CA1416: much of the Windows-only .NET surface (SecurityIdentifier,
          System.DirectoryServices.*, registry) is [SupportedOSPlatform("windows")]. ADx runs on
          Linux and macOS - that is half its value over RSAT - so promoting this to an error turns

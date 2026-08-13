@@ -18,11 +18,19 @@ internal static class AdFilterTranslator
     /// Translate <paramref name="filterText"/>. Returns <c>null</c> for RSAT's bare <c>*</c>
     /// ("match everything") -- a caller combines that with the preset's base object-class
     /// filter alone, contributing nothing further.
+    /// <para>
+    /// <paramref name="attributeOverrides"/> is the calling preset's
+    /// <c>AdObjectSchema.AttributeOverrides</c>: per-type property names (a PSO's
+    /// <c>Precedence</c>, an OU's <c>StreetAddress</c>) that either do not exist in the global
+    /// tables or resolve there to a different type's attribute. They take precedence, exactly
+    /// as they do in the projector -- filter and output must agree on what a property means.
+    /// </para>
     /// </summary>
     public static AdFilterNode? Translate(
         string filterText,
         Func<string, (bool Found, object? Value)> resolveVariable,
-        bool allowUnknownProperty = false)
+        bool allowUnknownProperty = false,
+        IReadOnlyDictionary<string, string>? attributeOverrides = null)
     {
         ArgumentNullException.ThrowIfNull(filterText);
         ArgumentNullException.ThrowIfNull(resolveVariable);
@@ -57,7 +65,7 @@ internal static class AdFilterTranslator
             throw new AdFilterTranslationException(
                 $"'-Filter' could not be parsed: {(errors.Length > 0 ? errors[0].Message : $"invalid token '{damaged.Text}'")}");
 
-        var parser = new AdFilterParser(tokens, resolveVariable, allowUnknownProperty);
+        var parser = new AdFilterParser(tokens, resolveVariable, allowUnknownProperty, attributeOverrides);
         var node = parser.ParseFilterExpression();
 
         // The real validity gate: nothing may remain after a complete expression. Without this,

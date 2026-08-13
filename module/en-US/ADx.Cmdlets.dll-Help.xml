@@ -874,7 +874,7 @@ PS C:\&gt; Get-ADxComputer -Filter "Enabled -eq $true -and LastLogonDate -lt $st
     </command:details>
     <maml:description>
       <maml:para>Reads the password and account-lockout policy stored on the domain head (the defaultNamingContext object) in a single base-scope read: MinPasswordLength, PasswordHistoryCount, MaxPasswordAge, MinPasswordAge, LockoutDuration, LockoutObservationWindow, LockoutThreshold, ComplexityEnabled, and ReversibleEncryptionEnabled.</maml:para>
-      <maml:para>The four age/duration values are AD interval attributes — stored as negative 100-nanosecond tick counts — and are surfaced as positive `TimeSpan`s exactly as RSAT emits them. A `MaxPasswordAge` of `00:00:00` means passwords are set to never expire at the domain level (the stored "none" value); the special "never" sentinel surfaces as `TimeSpan.MaxValue`.</maml:para>
+      <maml:para>The four age/duration values are AD interval attributes — stored as negative 100-nanosecond tick counts — and are surfaced as positive `TimeSpan`s. Two stored states are special, and ADx deliberately keeps them distinguishable where RSAT does not: a stored `0` ("no value set") surfaces as `00:00:00`, and the "never" sentinel (`0x8000000000000000`) surfaces as `TimeSpan.MaxValue` — RSAT collapses both to `00:00:00`. An audit ported from RSAT that detects never-expire policies with `MaxPasswordAge -eq 0` must also test `[TimeSpan]::MaxValue` here. See the README's "Deliberate divergences from RSAT".</maml:para>
       <maml:para>Unlike RSAT there is no `-Identity`/`-Current`: RSAT locates other domains through the netlogon DC locator, which is not an LDAP operation. Here the connected domain is the target — point `-Server` at a DC (or the DNS domain name) of the domain whose policy you want.</maml:para>
       <maml:para>Note this is the default domain policy only. Fine-grained password policies (PSOs) are separate objects and are not read by this cmdlet, same as its RSAT counterpart.</maml:para>
     </maml:description>
@@ -1858,6 +1858,7 @@ PS C:\&gt; Get-ADxComputer -Filter "Enabled -eq $true -and LastLogonDate -lt $st
     <maml:alertSet>
       <maml:alert>
         <maml:para>OperationMasterRoles is computed by resolving the five FSMO role holders to hostnames and matching them to each DC. `-Filter *` is scoped to the connected domain, matching RSAT; the schema and domain-naming masters are forest-wide, the PDC/RID/Infrastructure masters are of the connected domain.</maml:para>
+        <maml:para>`-Identity` matches forest-wide (RSAT errors for a DC outside the connected domain — a deliberate, documented divergence). A foreign-domain DC comes back with per-DC-honest values: its own Domain (config-partition data), IsReadOnly from the forest-replicated `nTDSDSARO` object class, and OperationMasterRoles as `$null` plus a warning — its domain's role objects sit behind a referral this bind cannot read, so a confident empty list would be wrong. Bind `-Server &lt;that domain&gt;` to read its roles.</maml:para>
       </maml:alert>
     </maml:alertSet>
     <command:examples>
@@ -8151,7 +8152,7 @@ Search-ADxObject '(objectClass=group)' -SearchBase $root.DefaultNamingContext -A
         <command:parameter required="false" variableLength="true" globbing="false" pipelineInput="False" position="named" aliases="none">
           <maml:name>Port</maml:name>
           <maml:description>
-            <maml:para>389 plain, 636 LDAPS, 3268/3269 Global Catalog. Defaults to 389, or 636 with `-UseSsl`.</maml:para>
+            <maml:para>389 plain, 636 LDAPS, 3268/3269 Global Catalog. Defaults to 389, or 636 with `-UseSsl`. 636 and 3269 imply LDAPS unless `-UseSsl:$false` is explicitly bound - a plaintext bind against an LDAPS port can never succeed. Conflicts with a port embedded in `-Server` (a terminating error names both).</maml:para>
           </maml:description>
           <command:parameterValue required="true" variableLength="false">Int32</command:parameterValue>
           <dev:type>
@@ -8199,7 +8200,7 @@ Search-ADxObject '(objectClass=group)' -SearchBase $root.DefaultNamingContext -A
         <command:parameter required="false" variableLength="true" globbing="false" pipelineInput="False" position="named" aliases="Base, OrganizationalUnit, OU">
           <maml:name>SearchBase</maml:name>
           <maml:description>
-            <maml:para>Search root. Defaults to the domain's defaultNamingContext, read from RootDSE.</maml:para>
+            <maml:para>Search root. Defaults to the domain's defaultNamingContext, read from RootDSE. Also constrains `-Identity` resolution: with a search base, every identity form (DNs and GUIDs included) resolves inside it.</maml:para>
           </maml:description>
           <command:parameterValue required="true" variableLength="false">String</command:parameterValue>
           <dev:type>
@@ -8211,7 +8212,7 @@ Search-ADxObject '(objectClass=group)' -SearchBase $root.DefaultNamingContext -A
         <command:parameter required="false" variableLength="true" globbing="false" pipelineInput="False" position="named" aliases="none">
           <maml:name>SearchScope</maml:name>
           <maml:description>
-            <maml:para>`Base`, `OneLevel`, or `Subtree` (default).</maml:para>
+            <maml:para>`Base`, `OneLevel`, or `Subtree` (default). Also constrains `-Identity` resolution: an explicitly narrowed scope routes DN and GUID identities through the scoped search instead of their base-read fast path.</maml:para>
           </maml:description>
           <command:parameterValueGroup>
             <command:parameterValue required="false" command:variableLength="false">Base</command:parameterValue>
@@ -8240,7 +8241,7 @@ Search-ADxObject '(objectClass=group)' -SearchBase $root.DefaultNamingContext -A
         <command:parameter required="false" variableLength="true" globbing="false" pipelineInput="False" position="named" aliases="DomainController, DC">
           <maml:name>Server</maml:name>
           <maml:description>
-            <maml:para>Domain controller or, preferably, the DNS domain name. Defaults to `USERDNSDOMAIN`.</maml:para>
+            <maml:para>Domain controller or, preferably, the DNS domain name. Defaults to `USERDNSDOMAIN`. The RSAT `host:port` spelling is honoured: the embedded port drives the effective port (Global Catalog handling included) and 636/3269 imply LDAPS. Combining it with a conflicting `-Port` is a terminating error; malformed values (whitespace, bad ports, broken IPv6 brackets) are rejected loudly rather than passed to the native stack.</maml:para>
           </maml:description>
           <command:parameterValue required="true" variableLength="false">String</command:parameterValue>
           <dev:type>
@@ -8252,7 +8253,7 @@ Search-ADxObject '(objectClass=group)' -SearchBase $root.DefaultNamingContext -A
         <command:parameter required="false" variableLength="true" globbing="false" pipelineInput="False" position="named" aliases="none">
           <maml:name>UseSsl</maml:name>
           <maml:description>
-            <maml:para>LDAPS. Changes the default port to 636.</maml:para>
+            <maml:para>LDAPS. Changes the default port to 636. When not explicitly bound, an effective port of 636/3269 (via `-Port` or `-Server host:port`) implies it; `-UseSsl:$false` always wins.</maml:para>
           </maml:description>
           <dev:type>
             <maml:name>SwitchParameter</maml:name>
@@ -8279,6 +8280,7 @@ Search-ADxObject '(objectClass=group)' -SearchBase $root.DefaultNamingContext -A
           <maml:name>Identity</maml:name>
           <maml:description>
             <maml:para>A distinguished name, objectGUID (D or N format), SID (`S-1-5-...`), or sAMAccountName, detected in that order. A DN is resolved with a single base-scope read - the fastest possible lookup - and verified to actually be a user, so a group DN is an ObjectNotFound error rather than a group object. Takes pipeline input by value and by a `DistinguishedName` property, so ADx output pipes back in.</maml:para>
+            <maml:para>An identity that does not exist is a TERMINATING error (matching RSAT), so `try { Get-ADxUser $name } catch { }` is the existence-check idiom; `-ErrorAction SilentlyContinue` does not silence the miss. `-SearchBase` and an explicitly narrowed `-SearchScope` constrain identity resolution for every identity form, DNs and GUIDs included (an ADx extension - RSAT refuses the combination); only the unconstrained default keeps the base-read fast path, which also reaches configuration/schema-partition DNs.</maml:para>
           </maml:description>
           <command:parameterValue required="true" variableLength="false">Object</command:parameterValue>
           <dev:type>
@@ -8342,7 +8344,7 @@ Search-ADxObject '(objectClass=group)' -SearchBase $root.DefaultNamingContext -A
         <command:parameter required="false" variableLength="true" globbing="false" pipelineInput="False" position="named" aliases="none">
           <maml:name>Port</maml:name>
           <maml:description>
-            <maml:para>389 plain, 636 LDAPS, 3268/3269 Global Catalog. Defaults to 389, or 636 with `-UseSsl`.</maml:para>
+            <maml:para>389 plain, 636 LDAPS, 3268/3269 Global Catalog. Defaults to 389, or 636 with `-UseSsl`. 636 and 3269 imply LDAPS unless `-UseSsl:$false` is explicitly bound - a plaintext bind against an LDAPS port can never succeed. Conflicts with a port embedded in `-Server` (a terminating error names both).</maml:para>
           </maml:description>
           <command:parameterValue required="true" variableLength="false">Int32</command:parameterValue>
           <dev:type>
@@ -8390,7 +8392,7 @@ Search-ADxObject '(objectClass=group)' -SearchBase $root.DefaultNamingContext -A
         <command:parameter required="false" variableLength="true" globbing="false" pipelineInput="False" position="named" aliases="Base, OrganizationalUnit, OU">
           <maml:name>SearchBase</maml:name>
           <maml:description>
-            <maml:para>Search root. Defaults to the domain's defaultNamingContext, read from RootDSE.</maml:para>
+            <maml:para>Search root. Defaults to the domain's defaultNamingContext, read from RootDSE. Also constrains `-Identity` resolution: with a search base, every identity form (DNs and GUIDs included) resolves inside it.</maml:para>
           </maml:description>
           <command:parameterValue required="true" variableLength="false">String</command:parameterValue>
           <dev:type>
@@ -8402,7 +8404,7 @@ Search-ADxObject '(objectClass=group)' -SearchBase $root.DefaultNamingContext -A
         <command:parameter required="false" variableLength="true" globbing="false" pipelineInput="False" position="named" aliases="none">
           <maml:name>SearchScope</maml:name>
           <maml:description>
-            <maml:para>`Base`, `OneLevel`, or `Subtree` (default).</maml:para>
+            <maml:para>`Base`, `OneLevel`, or `Subtree` (default). Also constrains `-Identity` resolution: an explicitly narrowed scope routes DN and GUID identities through the scoped search instead of their base-read fast path.</maml:para>
           </maml:description>
           <command:parameterValueGroup>
             <command:parameterValue required="false" command:variableLength="false">Base</command:parameterValue>
@@ -8431,7 +8433,7 @@ Search-ADxObject '(objectClass=group)' -SearchBase $root.DefaultNamingContext -A
         <command:parameter required="false" variableLength="true" globbing="false" pipelineInput="False" position="named" aliases="DomainController, DC">
           <maml:name>Server</maml:name>
           <maml:description>
-            <maml:para>Domain controller or, preferably, the DNS domain name. Defaults to `USERDNSDOMAIN`.</maml:para>
+            <maml:para>Domain controller or, preferably, the DNS domain name. Defaults to `USERDNSDOMAIN`. The RSAT `host:port` spelling is honoured: the embedded port drives the effective port (Global Catalog handling included) and 636/3269 imply LDAPS. Combining it with a conflicting `-Port` is a terminating error; malformed values (whitespace, bad ports, broken IPv6 brackets) are rejected loudly rather than passed to the native stack.</maml:para>
           </maml:description>
           <command:parameterValue required="true" variableLength="false">String</command:parameterValue>
           <dev:type>
@@ -8443,7 +8445,7 @@ Search-ADxObject '(objectClass=group)' -SearchBase $root.DefaultNamingContext -A
         <command:parameter required="false" variableLength="true" globbing="false" pipelineInput="False" position="named" aliases="none">
           <maml:name>UseSsl</maml:name>
           <maml:description>
-            <maml:para>LDAPS. Changes the default port to 636.</maml:para>
+            <maml:para>LDAPS. Changes the default port to 636. When not explicitly bound, an effective port of 636/3269 (via `-Port` or `-Server host:port`) implies it; `-UseSsl:$false` always wins.</maml:para>
           </maml:description>
           <dev:type>
             <maml:name>SwitchParameter</maml:name>
@@ -8533,7 +8535,7 @@ Search-ADxObject '(objectClass=group)' -SearchBase $root.DefaultNamingContext -A
         <command:parameter required="false" variableLength="true" globbing="false" pipelineInput="False" position="named" aliases="none">
           <maml:name>Port</maml:name>
           <maml:description>
-            <maml:para>389 plain, 636 LDAPS, 3268/3269 Global Catalog. Defaults to 389, or 636 with `-UseSsl`.</maml:para>
+            <maml:para>389 plain, 636 LDAPS, 3268/3269 Global Catalog. Defaults to 389, or 636 with `-UseSsl`. 636 and 3269 imply LDAPS unless `-UseSsl:$false` is explicitly bound - a plaintext bind against an LDAPS port can never succeed. Conflicts with a port embedded in `-Server` (a terminating error names both).</maml:para>
           </maml:description>
           <command:parameterValue required="true" variableLength="false">Int32</command:parameterValue>
           <dev:type>
@@ -8581,7 +8583,7 @@ Search-ADxObject '(objectClass=group)' -SearchBase $root.DefaultNamingContext -A
         <command:parameter required="false" variableLength="true" globbing="false" pipelineInput="False" position="named" aliases="Base, OrganizationalUnit, OU">
           <maml:name>SearchBase</maml:name>
           <maml:description>
-            <maml:para>Search root. Defaults to the domain's defaultNamingContext, read from RootDSE.</maml:para>
+            <maml:para>Search root. Defaults to the domain's defaultNamingContext, read from RootDSE. Also constrains `-Identity` resolution: with a search base, every identity form (DNs and GUIDs included) resolves inside it.</maml:para>
           </maml:description>
           <command:parameterValue required="true" variableLength="false">String</command:parameterValue>
           <dev:type>
@@ -8593,7 +8595,7 @@ Search-ADxObject '(objectClass=group)' -SearchBase $root.DefaultNamingContext -A
         <command:parameter required="false" variableLength="true" globbing="false" pipelineInput="False" position="named" aliases="none">
           <maml:name>SearchScope</maml:name>
           <maml:description>
-            <maml:para>`Base`, `OneLevel`, or `Subtree` (default).</maml:para>
+            <maml:para>`Base`, `OneLevel`, or `Subtree` (default). Also constrains `-Identity` resolution: an explicitly narrowed scope routes DN and GUID identities through the scoped search instead of their base-read fast path.</maml:para>
           </maml:description>
           <command:parameterValueGroup>
             <command:parameterValue required="false" command:variableLength="false">Base</command:parameterValue>
@@ -8622,7 +8624,7 @@ Search-ADxObject '(objectClass=group)' -SearchBase $root.DefaultNamingContext -A
         <command:parameter required="false" variableLength="true" globbing="false" pipelineInput="False" position="named" aliases="DomainController, DC">
           <maml:name>Server</maml:name>
           <maml:description>
-            <maml:para>Domain controller or, preferably, the DNS domain name. Defaults to `USERDNSDOMAIN`.</maml:para>
+            <maml:para>Domain controller or, preferably, the DNS domain name. Defaults to `USERDNSDOMAIN`. The RSAT `host:port` spelling is honoured: the embedded port drives the effective port (Global Catalog handling included) and 636/3269 imply LDAPS. Combining it with a conflicting `-Port` is a terminating error; malformed values (whitespace, bad ports, broken IPv6 brackets) are rejected loudly rather than passed to the native stack.</maml:para>
           </maml:description>
           <command:parameterValue required="true" variableLength="false">String</command:parameterValue>
           <dev:type>
@@ -8634,7 +8636,7 @@ Search-ADxObject '(objectClass=group)' -SearchBase $root.DefaultNamingContext -A
         <command:parameter required="false" variableLength="true" globbing="false" pipelineInput="False" position="named" aliases="none">
           <maml:name>UseSsl</maml:name>
           <maml:description>
-            <maml:para>LDAPS. Changes the default port to 636.</maml:para>
+            <maml:para>LDAPS. Changes the default port to 636. When not explicitly bound, an effective port of 636/3269 (via `-Port` or `-Server host:port`) implies it; `-UseSsl:$false` always wins.</maml:para>
           </maml:description>
           <dev:type>
             <maml:name>SwitchParameter</maml:name>
@@ -8722,6 +8724,7 @@ Search-ADxObject '(objectClass=group)' -SearchBase $root.DefaultNamingContext -A
         <maml:name>Identity</maml:name>
         <maml:description>
           <maml:para>A distinguished name, objectGUID (D or N format), SID (`S-1-5-...`), or sAMAccountName, detected in that order. A DN is resolved with a single base-scope read - the fastest possible lookup - and verified to actually be a user, so a group DN is an ObjectNotFound error rather than a group object. Takes pipeline input by value and by a `DistinguishedName` property, so ADx output pipes back in.</maml:para>
+          <maml:para>An identity that does not exist is a TERMINATING error (matching RSAT), so `try { Get-ADxUser $name } catch { }` is the existence-check idiom; `-ErrorAction SilentlyContinue` does not silence the miss. `-SearchBase` and an explicitly narrowed `-SearchScope` constrain identity resolution for every identity form, DNs and GUIDs included (an ADx extension - RSAT refuses the combination); only the unconstrained default keeps the base-read fast path, which also reaches configuration/schema-partition DNs.</maml:para>
         </maml:description>
         <command:parameterValue required="true" variableLength="false">Object</command:parameterValue>
         <dev:type>
@@ -8745,7 +8748,7 @@ Search-ADxObject '(objectClass=group)' -SearchBase $root.DefaultNamingContext -A
       <command:parameter required="false" variableLength="true" globbing="false" pipelineInput="False" position="named" aliases="none">
         <maml:name>Port</maml:name>
         <maml:description>
-          <maml:para>389 plain, 636 LDAPS, 3268/3269 Global Catalog. Defaults to 389, or 636 with `-UseSsl`.</maml:para>
+          <maml:para>389 plain, 636 LDAPS, 3268/3269 Global Catalog. Defaults to 389, or 636 with `-UseSsl`. 636 and 3269 imply LDAPS unless `-UseSsl:$false` is explicitly bound - a plaintext bind against an LDAPS port can never succeed. Conflicts with a port embedded in `-Server` (a terminating error names both).</maml:para>
         </maml:description>
         <command:parameterValue required="true" variableLength="false">Int32</command:parameterValue>
         <dev:type>
@@ -8793,7 +8796,7 @@ Search-ADxObject '(objectClass=group)' -SearchBase $root.DefaultNamingContext -A
       <command:parameter required="false" variableLength="true" globbing="false" pipelineInput="False" position="named" aliases="Base, OrganizationalUnit, OU">
         <maml:name>SearchBase</maml:name>
         <maml:description>
-          <maml:para>Search root. Defaults to the domain's defaultNamingContext, read from RootDSE.</maml:para>
+          <maml:para>Search root. Defaults to the domain's defaultNamingContext, read from RootDSE. Also constrains `-Identity` resolution: with a search base, every identity form (DNs and GUIDs included) resolves inside it.</maml:para>
         </maml:description>
         <command:parameterValue required="true" variableLength="false">String</command:parameterValue>
         <dev:type>
@@ -8805,7 +8808,7 @@ Search-ADxObject '(objectClass=group)' -SearchBase $root.DefaultNamingContext -A
       <command:parameter required="false" variableLength="true" globbing="false" pipelineInput="False" position="named" aliases="none">
         <maml:name>SearchScope</maml:name>
         <maml:description>
-          <maml:para>`Base`, `OneLevel`, or `Subtree` (default).</maml:para>
+          <maml:para>`Base`, `OneLevel`, or `Subtree` (default). Also constrains `-Identity` resolution: an explicitly narrowed scope routes DN and GUID identities through the scoped search instead of their base-read fast path.</maml:para>
         </maml:description>
         <command:parameterValue required="true" variableLength="false">String</command:parameterValue>
         <dev:type>
@@ -8829,7 +8832,7 @@ Search-ADxObject '(objectClass=group)' -SearchBase $root.DefaultNamingContext -A
       <command:parameter required="false" variableLength="true" globbing="false" pipelineInput="False" position="named" aliases="DomainController, DC">
         <maml:name>Server</maml:name>
         <maml:description>
-          <maml:para>Domain controller or, preferably, the DNS domain name. Defaults to `USERDNSDOMAIN`.</maml:para>
+          <maml:para>Domain controller or, preferably, the DNS domain name. Defaults to `USERDNSDOMAIN`. The RSAT `host:port` spelling is honoured: the embedded port drives the effective port (Global Catalog handling included) and 636/3269 imply LDAPS. Combining it with a conflicting `-Port` is a terminating error; malformed values (whitespace, bad ports, broken IPv6 brackets) are rejected loudly rather than passed to the native stack.</maml:para>
         </maml:description>
         <command:parameterValue required="true" variableLength="false">String</command:parameterValue>
         <dev:type>
@@ -8841,7 +8844,7 @@ Search-ADxObject '(objectClass=group)' -SearchBase $root.DefaultNamingContext -A
       <command:parameter required="false" variableLength="true" globbing="false" pipelineInput="False" position="named" aliases="none">
         <maml:name>UseSsl</maml:name>
         <maml:description>
-          <maml:para>LDAPS. Changes the default port to 636.</maml:para>
+          <maml:para>LDAPS. Changes the default port to 636. When not explicitly bound, an effective port of 636/3269 (via `-Port` or `-Server host:port`) implies it; `-UseSsl:$false` always wins.</maml:para>
         </maml:description>
         <command:parameterValue required="false" variableLength="false">SwitchParameter</command:parameterValue>
         <dev:type>
@@ -11109,6 +11112,7 @@ PS C:\&gt; Get-ADxUser -Filter "LastLogonDate -lt $cutoff" -Properties LastLogon
     <maml:alertSet>
       <maml:alert>
         <maml:para>Requires network access to a domain controller and rights to read the objects queried. It does not require `Connect-MgGraph` -- the `ADx` cmdlets are independent of the Graph side of this module.</maml:para>
+        <maml:para>Constructed base-scope-only attributes (`tokenGroups`, `primaryGroupToken`) are computed by the DC only for base-scope reads and are silently omitted from onelevel/subtree results -- that is the LDAP wire behavior, and this cmdlet's raw contract deliberately does not paper over it with follow-up reads. Request them with `-SearchScope Base` against the object's own DN, or use the `Get-ADx*` presets, which fetch them with a follow-up base read when explicitly named in `-Properties`.</maml:para>
         <maml:para>On Linux and macOS the LDAP stack is provided by OpenLDAP. Minimal container images often omit it; if it is missing the cmdlet reports `LdapRuntimeMissing` with installation instructions rather than a native load failure.</maml:para>
         <maml:para>Active Directory caps a single attribute read at `MaxValRange` (default 1500). Past that it does not truncate the attribute, it renames it: a group with 3000 members comes back as `member;range=0-1499` rather than `member`.</maml:para>
         <maml:para>`Search-ADxObject` emits such attributes under their base name, so `$group.member` resolves as expected. When the returned range is partial it also emits `&lt;name&gt;Truncated` (`$true`) and `&lt;name&gt;RangeHigh` (the last index received), so a partial set is visible rather than silently mistaken for the whole set.</maml:para>

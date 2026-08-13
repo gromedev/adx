@@ -260,6 +260,35 @@ Describe 'Manifest and release hygiene' {
         $notes | Should -Match ('v{0}' -f [Regex]::Escape($script:Manifest.Version.ToString()))
     }
 
+    It 'Stamps the manifest version into <_> as FileVersion and InformationalVersion' -ForEach @(
+        'ADx.Cmdlets.dll', 'ADx.Engine.dll'
+    ) {
+        # 0.4: every release before this shipped AssemblyVersion/FileVersion 1.0.0.0 in every
+        # DLL, so a same-session upgrade silently ran the old code AND nothing could detect
+        # it. AssemblyVersion stays pinned on purpose (see the csproj comment); FileVersion/
+        # InformationalVersion carry the release identity, and the psm1 loader's stale-load
+        # warning depends on them. Stamping lives in Directory.Build.props so EVERY build
+        # path stamps (a bare dotnet build/test restages module/ and must not revert it);
+        # what fails here is a DLL whose stamp does not match this manifest.
+        $dll = Join-Path $PSScriptRoot "../module/$_"
+        $info = [System.Diagnostics.FileVersionInfo]::GetVersionInfo((Resolve-Path $dll).Path)
+        $expected = $script:Manifest.Version.ToString()
+
+        $info.FileVersion | Should -Be "$expected.0"
+        ($info.ProductVersion -split '\+')[0] | Should -Be $expected
+    }
+
+    It 'Keeps AssemblyVersion pinned at 1.0.0.0 in <_>' -ForEach @(
+        'ADx.Cmdlets.dll', 'ADx.Engine.dll'
+    ) {
+        # The pin is load-bearing: a per-release AssemblyVersion makes a same-session
+        # re-import fail with FileLoadException instead of binding, trading the loader's
+        # actionable warning for a bare CLR error. Do not "fix" it to track the release.
+        $dll = (Resolve-Path (Join-Path $PSScriptRoot "../module/$_")).Path
+        [System.Reflection.AssemblyName]::GetAssemblyName($dll).Version |
+            Should -Be ([version]'1.0.0.0')
+    }
+
     It 'Names the module files exactly, byte for byte' {
         # On a case-sensitive filesystem PowerShell resolves <name>.psd1 against the module
         # directory byte for byte, so casing drift breaks Import-Module on Linux -- one of
@@ -438,6 +467,20 @@ Describe 'Help' {
         'Get-ADxServiceAccount', 'Get-ADxFineGrainedPasswordPolicy', 'Search-ADxAccount'
     ) {
         (Get-Help $_).examples.example | Should -Not -BeNullOrEmpty
+    }
+
+    It 'Ships REGENERATED external help, not stale MAML' {
+        # Get-Help reads only the compiled XML; editing module/help/*.md without running
+        # New-ExternalHelp ships the old text. 0.4's first cut did exactly that: Get-Help
+        # kept claiming "a MaxPasswordAge of 00:00:00 means passwords never expire" -- the
+        # precise inverted guidance the .md had just corrected. Each positive sentinel is a
+        # phrase a doc fix introduced; the negative sentinel is the corrected claim.
+        $maml = Get-Content -Raw (Join-Path $PSScriptRoot '../module/en-US/ADx.Cmdlets.dll-Help.xml')
+
+        $maml | Should -Match 'TimeSpan\.MaxValue'   # interval-sentinel divergence (password policy page)
+        $maml | Should -Match 'host:port'            # -Server spelling (shared parameter docs)
+        $maml | Should -Match 'nTDSDSARO'            # foreign-DC honesty (domain controller page)
+        $maml | Should -Not -Match 'exactly as RSAT emits them'  # the pre-0.4 inverted claim
     }
 }
 

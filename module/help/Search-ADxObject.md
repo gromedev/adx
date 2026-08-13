@@ -368,6 +368,13 @@ Requires network access to a domain controller and rights to read the objects qu
 does not require `Connect-MgGraph` -- the `ADx` cmdlets are independent of the Graph side of
 this module.
 
+Constructed base-scope-only attributes (`tokenGroups`, `primaryGroupToken`) are computed by
+the DC only for base-scope reads and are silently omitted from onelevel/subtree results --
+that is the LDAP wire behavior, and this cmdlet's raw contract deliberately does not paper
+over it with follow-up reads. Request them with `-SearchScope Base` against the object's own
+DN, or use the `Get-ADx*` presets, which fetch them with a follow-up base read when
+explicitly named in `-Properties`.
+
 On Linux and macOS the LDAP stack is provided by OpenLDAP. Minimal container images often
 omit it; if it is missing the cmdlet reports `LdapRuntimeMissing` with installation
 instructions rather than a native load failure.

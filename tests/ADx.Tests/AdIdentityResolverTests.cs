@@ -239,4 +239,28 @@ public class AdIdentityResolverTests
         var node = AdIdentityResolver.BuildLookupFilter(AdIdentityKind.SamAccountName, "we(i)rd");
         Assert.Equal("(sAMAccountName=we\\28i\\29rd)", AdFilterEmitter.Emit(node));
     }
+
+    [Fact]
+    public void DnLookup_EmitsDistinguishedNameEquality()
+    {
+        // 0.4: the scoped identity path. With -SearchBase, a DN identity resolves through a
+        // search INSIDE the requested subtree instead of a base read that escapes it.
+        var node = AdIdentityResolver.BuildLookupFilter(
+            AdIdentityKind.DistinguishedName, "CN=John Doe,OU=Sales,DC=corp,DC=com");
+        Assert.Equal(
+            "(distinguishedName=CN=John Doe,OU=Sales,DC=corp,DC=com)",
+            AdFilterEmitter.Emit(node));
+    }
+
+    [Fact]
+    public void DnLookup_EscapesFilterMetacharacters()
+    {
+        // A DN legitimately contains an escaped comma as backslash-comma; in the FILTER
+        // encoding that backslash must itself become \5c or the assertion is corrupt.
+        var node = AdIdentityResolver.BuildLookupFilter(
+            AdIdentityKind.DistinguishedName, @"CN=Doe\, John,OU=Sales,DC=corp,DC=com");
+        Assert.Equal(
+            @"(distinguishedName=CN=Doe\5c, John,OU=Sales,DC=corp,DC=com)",
+            AdFilterEmitter.Emit(node));
+    }
 }

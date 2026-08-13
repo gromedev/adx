@@ -276,6 +276,13 @@ matching them to each DC. `-Filter *` is scoped to the connected domain, matchin
 schema and domain-naming masters are forest-wide, the PDC/RID/Infrastructure masters are of the
 connected domain.
 
+`-Identity` matches forest-wide (RSAT errors for a DC outside the connected domain — a
+deliberate, documented divergence). A foreign-domain DC comes back with per-DC-honest values:
+its own Domain (config-partition data), IsReadOnly from the forest-replicated `nTDSDSARO`
+object class, and OperationMasterRoles as `$null` plus a warning — its domain's role objects
+sit behind a referral this bind cannot read, so a confident empty list would be wrong. Bind
+`-Server <that domain>` to read its roles.
+
 ## RELATED LINKS
 
 [Get-ADxDomain](Get-ADxDomain.md)

@@ -18,7 +18,10 @@ Get-ChildItem $ModuleRoot -Filter '*.dll' | Remove-Item -Force
 Get-ChildItem $ModuleRoot -Filter '*.pdb' | Remove-Item -Force
 Get-ChildItem $ModuleRoot -Filter '*.deps.json' | Remove-Item -Force
 
-# Build the solution
+# Build the solution. Version stamping (FileVersion/InformationalVersion from the manifest's
+# ModuleVersion) happens in Directory.Build.props so that EVERY build path stamps -- a bare
+# `dotnet build`/`dotnet test` restages module/*.dll via the StageModuleOutput target, and a
+# stamping step that lived only here would let those silently revert the staged DLLs.
 dotnet build "$PSScriptRoot/ADx.slnx" -c $Configuration --nologo
 if ($LASTEXITCODE -ne 0) { throw "Build failed with exit code $LASTEXITCODE" }
 

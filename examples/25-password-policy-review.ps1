@@ -13,10 +13,13 @@
 #
 # The age and duration values are AD *interval* attributes - negative 100-nanosecond
 # tick counts, a different animal from the FILETIME timestamps that look identical on
-# the wire. ADx decodes them on their own syntax and surfaces positive TimeSpans,
-# exactly as RSAT does; decoding them as FILETIME would silently null every one. The
-# same reasoning is why -Filter refuses interval attributes outright - compare them
-# after reading, as the last block does.
+# the wire. ADx decodes them on their own syntax and surfaces positive TimeSpans;
+# decoding them as FILETIME would silently null every one. One documented divergence
+# from RSAT: the stored "never" sentinel surfaces as [TimeSpan]::MaxValue where RSAT
+# collapses it into 00:00:00 - so a never-expire audit must test BOTH 00:00:00 (stored
+# "none") and MaxValue (see the README's divergences list). The same syntax reasoning
+# is why -Filter refuses interval attributes outright - compare them after reading,
+# as the last block does.
 #
 # Requirements: PowerShell 7.5+, read access to the directory (but see the PSO
 # permission note at the bottom).

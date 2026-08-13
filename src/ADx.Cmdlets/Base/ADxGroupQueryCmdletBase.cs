@@ -91,7 +91,8 @@ public abstract class ADxGroupQueryCmdletBase : ADxMembershipQueryCmdletBase
             var group = ResolveGroup();
             if (group is null)
             {
-                WriteError(new ErrorRecord(
+                // Terminating, matching RSAT -- see the ADxObjectCmdletBase not-found site.
+                ThrowTerminatingError(new ErrorRecord(
                     new ItemNotFoundException($"Cannot find a group with identity '{Identity}'."),
                     "ADxObjectNotFound", ErrorCategory.ObjectNotFound, Identity));
                 return;

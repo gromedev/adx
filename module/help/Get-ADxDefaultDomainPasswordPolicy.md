@@ -26,9 +26,12 @@ PasswordHistoryCount, MaxPasswordAge, MinPasswordAge, LockoutDuration, LockoutOb
 LockoutThreshold, ComplexityEnabled, and ReversibleEncryptionEnabled.
 
 The four age/duration values are AD *interval* attributes — stored as negative 100-nanosecond
-tick counts — and are surfaced as positive `TimeSpan`s exactly as RSAT emits them. A
-`MaxPasswordAge` of `00:00:00` means passwords are set to never expire at the domain level
-(the stored "none" value); the special "never" sentinel surfaces as `TimeSpan.MaxValue`.
+tick counts — and are surfaced as positive `TimeSpan`s. Two stored states are special, and ADx
+deliberately keeps them distinguishable where RSAT does not: a stored `0` ("no value set")
+surfaces as `00:00:00`, and the "never" sentinel (`0x8000000000000000`) surfaces as
+`TimeSpan.MaxValue` — RSAT collapses both to `00:00:00`. An audit ported from RSAT that
+detects never-expire policies with `MaxPasswordAge -eq 0` must also test
+`[TimeSpan]::MaxValue` here. See the README's "Deliberate divergences from RSAT".
 
 Unlike RSAT there is no `-Identity`/`-Current`: RSAT locates other domains through the netlogon
 DC locator, which is not an LDAP operation. Here the connected domain is the target — point

@@ -12,6 +12,29 @@ $ModuleRoot = $PSScriptRoot
 $CmdletsDll = Join-Path $ModuleRoot 'ADx.Cmdlets.dll'
 if (Test-Path $CmdletsDll) {
     Import-Module $CmdletsDll
+
+    # Same-session upgrade guard. Assemblies never unload from the Default ALC, and
+    # AssemblyVersion is deliberately pinned (see the csproj comment) so a re-import BINDS to
+    # the already-loaded copy rather than failing - meaning an upgrade imported into a session
+    # that already ran ADx silently executes the OLD code. The stamped InformationalVersion
+    # (Directory.Build.props, from this manifest) is what makes the staleness detectable at all.
+    $loadedAssembly = [System.AppDomain]::CurrentDomain.GetAssemblies() |
+        Where-Object { $_.GetName().Name -eq 'ADx.Cmdlets' } |
+        Select-Object -First 1
+    if ($loadedAssembly) {
+        $informational = ($loadedAssembly.GetCustomAttributes(
+                [System.Reflection.AssemblyInformationalVersionAttribute], $false) |
+            Select-Object -First 1).InformationalVersion
+        # The SDK appends "+<commit>" when a source revision is known; the release version is
+        # the part before it.
+        $loadedVersion = if ($informational) { ($informational -split '\+')[0] } else { $null }
+        $manifestVersion = (Import-PowerShellDataFile (Join-Path $ModuleRoot 'adx.psd1')).ModuleVersion
+
+        if ($loadedVersion -and $manifestVersion -and $loadedVersion -ne $manifestVersion) {
+            Write-Warning ("ADx $loadedVersion is already loaded in this session, but this module is " +
+                "$manifestVersion. PowerShell cannot unload assemblies; restart pwsh to run the new version.")
+        }
+    }
 } else {
     Write-Error "ADx.Cmdlets.dll not found at $CmdletsDll. Did you run the build script?"
 }

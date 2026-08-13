@@ -1,0 +1,32 @@
+<Project>
+
+  <!-- Version stamping, single-sourced from module/adx.psd1's ModuleVersion. This lives in
+       MSBuild (not build.ps1) because the ADx.Cmdlets StageModuleOutput target restages
+       module/*.dll on EVERY build - a bare `dotnet build` or `dotnet test` that stamped
+       nothing would silently revert the staged DLLs to unstamped copies, which is exactly
+       the undetectable-stale-binary problem this exists to end. FileVersion and
+       InformationalVersion carry the release identity; AssemblyVersion stays pinned at
+       1.0.0.0 in each csproj (see the comment there) so same-session re-imports bind
+       instead of throwing, and the psm1 loader can warn on staleness.
+       Quoting note: MSBuild's property-function argument parser concatenates adjacent
+       quoted and unquoted segments into one string argument, so the apostrophes bracketing
+       the capture group below reach the regex as literal quote characters - matching the
+       psd1's ModuleVersion = '0.4.0' spelling. Guarantees, precisely: a MALFORMED expression
+       fails the build at parse time; a WELL-FORMED expression whose regex simply does not
+       match (say the manifest line is re-quoted with double quotes) yields an empty version,
+       which the AdxValidateManifestVersion target below turns into a build ERROR - without
+       it, the SDK would quietly stamp FileVersion '.0' (warning only) and fall back to
+       InformationalVersion 1.0.0, making a release DLL indistinguishable from the pre-0.4
+       unstamped ones. The CI Pester stamp test is the second net. -->
+  <PropertyGroup>
+    <AdxManifestVersion>$([System.Text.RegularExpressions.Regex]::Match($([System.IO.File]::ReadAllText('$(MSBuildThisFileDirectory)module/adx.psd1')), 'ModuleVersion\s*=\s*'([0-9.]+)'').Groups[1].Value)</AdxManifestVersion>
+    <FileVersion>$(AdxManifestVersion).0</FileVersion>
+    <InformationalVersion>$(AdxManifestVersion)</InformationalVersion>
+  </PropertyGroup>
+
+  <Target Name="AdxValidateManifestVersion" BeforeTargets="BeforeBuild">
+    <Error Condition="'$(AdxManifestVersion)' == ''"
+           Text="Could not extract ModuleVersion from module/adx.psd1 (expected a single-quoted ModuleVersion = 'x.y.z' line). Version stamping would silently produce unversioned assemblies; fix the manifest line or this file's regex." />
+  </Target>
+
+</Project>

@@ -241,6 +241,32 @@ Each of these is a *decision*, made once and documented here, never a silent dif
   fractional bound in the operator's direction (an exact equivalence, not an approximation)
   and refuses fractional equality outright. FILETIME attributes (`pwdLastSet`, ...) keep full
   100 ns precision.
+- **The interval "never" sentinel surfaces as `TimeSpan.MaxValue`, not RSAT's `00:00:00`.**
+  AD stores two distinct states in `maxPwdAge`-class attributes: `0` ("no value set") and
+  `0x8000000000000000` ("never"). RSAT collapses both to `00:00:00`; ADx keeps them apart —
+  `0` stays `00:00:00`, the sentinel becomes `TimeSpan.MaxValue`. An audit ported from RSAT
+  that finds never-expire policies with `MaxPasswordAge -eq 0` must also test
+  `[TimeSpan]::MaxValue` here, and gains the ability to tell the two states apart in return.
+- **`-Identity` composes with `-SearchBase`/`-SearchScope`.** RSAT refuses the combination at
+  parameter binding; ADx accepts it and resolves the identity *inside* the requested scope —
+  every identity form, distinguished names and GUIDs included: an explicit `-SearchBase` or an
+  explicitly narrowed `-SearchScope` routes them through the scoped search. Only the
+  unconstrained default (no `-SearchBase`, `Subtree` scope) keeps the base-read fast path,
+  which also reaches configuration/schema-partition objects.
+- **`Get-ADxDomainController -Identity` matches DCs forest-wide with honest per-DC values.**
+  RSAT errors on a DC outside the connected domain. ADx returns it, with `Domain` taken from
+  its own config-partition data, `IsReadOnly` derived from the forest-replicated `nTDSDSARO`
+  object class (correct even where the DC's computer object is unreadable), and
+  `OperationMasterRoles` as `$null` plus a warning — its domain's role objects live behind a
+  referral this bind cannot read, and a confident empty list would be a lie. `-Filter *`
+  remains scoped to the connected domain, matching RSAT.
+- **`msDS-UserPasswordExpiryTimeComputed` projects as a `DateTime` — or `$null` for the
+  sentinels.** RSAT emits the raw Int64 FILETIME, sentinels included; ADx converts real
+  timestamps to local `DateTime` and maps the sentinel values (`0`, and `0x7FFFFFFFFFFFFFFF`
+  = "never expires" — which the DC also returns for password-never-expires accounts,
+  smartcard-required accounts, and computer accounts) to `$null`. So "password never
+  expires" reads as `$null` here versus RSAT's `9223372036854775807`; the `.ToFileTime()`
+  round-trip to RSAT's shape applies only to real timestamps.
 
 ## License
 
